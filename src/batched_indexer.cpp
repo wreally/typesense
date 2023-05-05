@@ -18,7 +18,7 @@ void BatchedIndexer::enqueue(const std::shared_ptr<http_req>& req, const std::sh
     // NOTE: it's ok to access `req` and `res` in this function without synchronization
     // because the read thread for *this* request is paused now and resumes only messaged at the end
 
-    //LOG(INFO) << "BatchedIndexer::enqueue";
+    LOG(INFO) << "BatchedIndexer::enqueue";
     uint32_t chunk_sequence = 0;
 
     {
@@ -42,7 +42,7 @@ void BatchedIndexer::enqueue(const std::shared_ptr<http_req>& req, const std::sh
     const std::string& req_key_prefix = get_req_prefix_key(req->start_ts);
     const std::string& request_chunk_key = req_key_prefix + StringUtils::serialize_uint32_t(chunk_sequence);
 
-    //LOG(INFO) << "request_chunk_key: " << req->start_ts << "_" << chunk_sequence << ", req body: " << req->body;
+    LOG(INFO) << "request_chunk_key: " << req->start_ts << "_" << chunk_sequence << ", req body: " << req->body;
 
     store->insert(request_chunk_key, req->to_json());
 
@@ -50,7 +50,7 @@ void BatchedIndexer::enqueue(const std::shared_ptr<http_req>& req, const std::sh
     bool read_more_input = (req->_req != nullptr && req->_req->proceed_req);
 
     if(req->last_chunk_aggregate) {
-        //LOG(INFO) << "Last chunk for req_id: " << req->start_ts;
+        LOG(INFO) << "Last chunk for req_id: " << req->start_ts;
         queued_writes += (chunk_sequence + 1);
 
         {
@@ -145,6 +145,8 @@ void BatchedIndexer::run() {
                 queue.pop_front();
                 qlk.unlock();
 
+                LOG(INFO) << "req_id: " << req_id;
+
                 std::unique_lock mlk(mutex);
                 auto req_res_map_it = req_res_map.find(req_id);
                 if(req_res_map_it == req_res_map.end()) {
@@ -164,6 +166,8 @@ void BatchedIndexer::run() {
                 const std::string& req_key_start_prefix = req_key_prefix + StringUtils::serialize_uint32_t(
                                                                   orig_req_res.next_chunk_index);
 
+                LOG(INFO) << "req_key_start_prefix: " << req_key_start_prefix;
+
                 const std::string& req_key_upper_bound = get_req_suffix_key(req_id);  // cannot inline this
                 rocksdb::Slice upper_bound(req_key_upper_bound);
                 rocksdb::Iterator* iter = store->scan(req_key_start_prefix, &upper_bound);
@@ -181,8 +185,14 @@ void BatchedIndexer::run() {
 
                 while(iter->Valid() && iter->key().starts_with(req_key_prefix)) {
                     std::shared_lock slk(pause_mutex); // used for snapshot
+
+                    LOG(INFO) << "prev_body: " << prev_body;
+                    LOG(INFO) << "iter->value().ToString(): " << iter->value().ToString();
+
                     orig_req->body = prev_body;
                     orig_req->load_from_json(iter->value().ToString());
+
+                    LOG(INFO) << "augmented orig_req->body: " << orig_req->body;
 
                     // update thread local for reference during a crash
                     write_log_index = orig_req->log_index;
@@ -194,7 +204,7 @@ void BatchedIndexer::run() {
                     }
 
                     else {
-                        //LOG(INFO) << "index req " << req_id << ", chunk index: " << orig_req_res.next_chunk_index;
+                        LOG(INFO) << "index req " << req_id << ", chunk index: " << orig_req_res.next_chunk_index;
                         auto resource_check = cached_resource_stat_t::get_instance()
                                               .has_enough_resources(config.get_data_dir(),
                                                                     config.get_disk_used_max_percentage(),
@@ -212,6 +222,7 @@ void BatchedIndexer::run() {
                         }
 
                         else if(route_found) {
+                            LOG(INFO) << "route_found";
                             if(skip_writes && found_rpath->handler != post_config) {
                                 orig_res->set(422, "Skipping write.");
                                 orig_res->final = true;
@@ -222,7 +233,9 @@ void BatchedIndexer::run() {
 
                             async_res = found_rpath->async_res;
                             try {
+                                LOG(INFO) << "Before found_rpath->handler, " << found_rpath->_get_action();
                                 found_rpath->handler(orig_req, orig_res);
+                                LOG(INFO) << "After found_rpath->handler";
                             } catch(const std::exception& e) {
                                 LOG(ERROR) << "Exception while calling handler " << found_rpath->_get_action();
                                 LOG(ERROR) << "Raw error: " << e.what();
