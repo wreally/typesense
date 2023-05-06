@@ -84,10 +84,11 @@ cc_binary(
         "TYPESENSE_VERSION=\\\"$(TYPESENSE_VERSION)\\\""
     ],
     linkopts = select({
-        "@platforms//os:linux": ["-static-libstdc++", "-static-libgcc"],
+        "@platforms//os:linux": ["-static-libstdc++", "-static-libgcc", "-fsanitize=address"],
     }),
     copts = COPTS + select({
-        "@platforms//os:linux": ["-DBACKWARD_HAS_DW=1", "-DBACKWARD_HAS_UNWIND=1"],
+        "@platforms//os:linux": ["-DBACKWARD_HAS_DW=1", "-DBACKWARD_HAS_UNWIND=1", "-DASAN_BUILD",
+                                 "-fsanitize=address", "-fno-omit-frame-pointer"],
     }),
     deps = [":common_deps"] +  select({
         "@platforms//os:linux": [":linux_deps"],
