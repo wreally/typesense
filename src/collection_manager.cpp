@@ -345,6 +345,8 @@ Option<Collection*> CollectionManager::create_collection(const std::string& name
                                                          const bool enable_nested_fields) {
     std::unique_lock lock(coll_create_mutex);
 
+    LOG(INFO) << "CollectionManager::create_collection";
+
     if(store->contains(Collection::get_meta_key(name))) {
         return Option<Collection*>(409, std::string("A collection with name `") + name + "` already exists.");
     }
