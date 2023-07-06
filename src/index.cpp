@@ -6268,7 +6268,9 @@ void Index::get_doc_changes(const index_operation_t op, const tsl::htrie_map<cha
         if(it.value().is_null()) {
             // null values should not be indexed
             new_doc.erase(it.key());
-            del_doc[it.key()] = old_doc[it.key()];
+            if(old_doc.contains(it.key())) {
+                del_doc[it.key()] = old_doc[it.key()];
+            }
             it = update_doc.erase(it);
             continue;
         }
