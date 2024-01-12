@@ -446,14 +446,16 @@ private:
 
     void log_leaves(int cost, const std::string &token, const std::vector<art_leaf *> &leaves) const;
 
-    void do_facets(std::vector<facet> & facets, facet_query_t & facet_query,
-                   bool estimate_facets, size_t facet_sample_percent,
-                   const std::vector<facet_info_t>& facet_infos,
-                   size_t group_limit, const std::vector<std::string>& group_by_fields,
-                   const bool group_missing_values,
-                   const uint32_t* result_ids, size_t results_size,
-                   int max_facet_count, bool is_wildcard_query,
-                   facet_index_type_t facet_index_type) const;
+    Option<bool> do_facets(std::vector<facet> & facets, facet_query_t & facet_query,
+                           bool estimate_facets, size_t facet_sample_percent,
+                           const std::vector<facet_info_t>& facet_infos,
+                           size_t group_limit, const std::vector<std::string>& group_by_fields,
+                           const bool group_missing_values,
+                           const uint32_t* result_ids, size_t results_size,
+                           int max_facet_count, bool is_wildcard_query,
+                           facet_index_type_t facet_index_type,
+                           Collection const *const collection,
+                           std::unordered_map<std::string, reference_filter_result_t>& reference_facet_ids) const;
 
     bool static_filter_query_eval(const override_t* override, std::vector<std::string>& tokens,
                                   filter_node_t*& filter_tree_root) const;
@@ -604,6 +606,10 @@ private:
                                    const tsl::htrie_map<char, field>& embedding_fields,
                                    const tsl::htrie_map<char, field> & search_schema, const size_t remote_embedding_batch_size = 200,
                                    const size_t remote_embedding_timeout_ms = 60000, const size_t remote_embedding_num_tries = 2);
+
+    Option<bool> get_related_ids(const std::string& collection_name,
+                                 const std::string& reference_helper_field_name,
+                                 const uint32_t& seq_id, std::vector<uint32_t>& result) const;
     
 public:
     // for limiting number of results on multiple candidates / query rewrites
@@ -705,7 +711,7 @@ public:
 
     // Public operations
 
-    Option<bool> run_search(search_args* search_params, const std::string& collection_name,
+    Option<bool> run_search(search_args* search_params, Collection const *const collection,
                             facet_index_type_t facet_index_type);
 
     Option<bool> search(std::vector<query_tokens_t>& field_query_tokens, const std::vector<search_field_t>& the_fields,
@@ -733,7 +739,7 @@ public:
                 const size_t max_extra_suffix, const size_t facet_query_num_typos,
                 const bool filter_curated_hits, enable_t split_join_tokens,
                 const vector_query_t& vector_query, size_t facet_sample_percent, size_t facet_sample_threshold,
-                const std::string& collection_name,
+                Collection const *const collection,
                 const drop_tokens_param_t drop_tokens_mode,
                 facet_index_type_t facet_index_type = DETECT
                 ) const;
@@ -835,13 +841,40 @@ public:
 
     static void remove_matched_tokens(std::vector<std::string>& tokens, const std::set<std::string>& rule_token_set) ;
 
-    void compute_facet_infos(const std::vector<facet>& facets, facet_query_t& facet_query,
-                             const size_t facet_query_num_typos,
-                             const uint32_t* all_result_ids, const size_t& all_result_ids_len,
-                             const std::vector<std::string>& group_by_fields,
-                             size_t group_limit, bool is_wildcard_no_filter_query,
-                             size_t max_candidates,
-                             std::vector<facet_info_t>& facet_infos, facet_index_type_t facet_index_type) const;
+    Option<bool> compute_facet_infos_with_lock(const std::vector<facet>& facets, facet_query_t& facet_query,
+                                               const size_t facet_query_num_typos,
+                                               const uint32_t* all_result_ids, const size_t& all_result_ids_len,
+                                               const std::vector<std::string>& group_by_fields,
+                                               size_t group_limit, bool is_wildcard_no_filter_query,
+                                               size_t max_candidates,
+                                               std::vector<facet_info_t>& facet_infos, facet_index_type_t facet_index_type,
+                                               Collection const *const collection) const;
+
+    void get_reference_facet_ids(const uint32_t* all_result_ids, const size_t& all_result_ids_len,
+                                 const std::string& collection_name, Collection const *const ref_collection,
+                                 filter_result_iterator_t& filter_result_iterator,
+                                 std::unordered_map<std::string, reference_filter_result_t>& reference_facet_ids) const;
+
+    Option<bool> compute_facet_infos(const std::vector<facet>& facets, facet_query_t& facet_query,
+                                     const size_t facet_query_num_typos,
+                                     const uint32_t* all_result_ids, const size_t& all_result_ids_len,
+                                     const std::vector<std::string>& group_by_fields,
+                                     size_t group_limit, bool is_wildcard_no_filter_query,
+                                     size_t max_candidates,
+                                     std::vector<facet_info_t>& facet_infos, facet_index_type_t facet_index_type,
+                                     Collection const *const collection,
+                                     filter_result_iterator_t& filter_result_iterator,
+                                     std::unordered_map<std::string, reference_filter_result_t>& reference_facet_ids) const;
+
+    Option<bool> do_facets_with_lock(std::vector<facet> & facets, facet_query_t & facet_query,
+                                     bool estimate_facets, size_t facet_sample_percent,
+                                     const std::vector<facet_info_t>& facet_infos,
+                                     size_t group_limit, const std::vector<std::string>& group_by_fields,
+                                     const bool group_missing_values,
+                                     const uint32_t* result_ids, size_t results_size,
+                                     int max_facet_count, bool is_wildcard_query,
+                                     facet_index_type_t facet_index_type,
+                                     Collection const *const collection) const;
 
     void resolve_space_as_typos(std::vector<std::string>& qtokens, const std::string& field_name,
                                 std::vector<std::vector<std::string>>& resolved_queries) const;
@@ -1053,9 +1086,9 @@ public:
     Option<bool> seq_ids_outside_top_k(const std::string& field_name, size_t k,
                                        std::vector<uint32_t>& outside_seq_ids);
 
-    Option<bool> get_related_ids(const std::string& collection_name,
-                                 const std::string& reference_helper_field_name,
-                                 const uint32_t& seq_id, std::vector<uint32_t>& result) const;
+    Option<bool> get_related_ids_with_lock(const std::string& collection_name,
+                                           const std::string& reference_helper_field_name,
+                                           const uint32_t& seq_id, std::vector<uint32_t>& result) const;
 
     Option<bool> get_object_array_related_id(const std::string& collection_name,
                                              const std::string& reference_helper_field_name,

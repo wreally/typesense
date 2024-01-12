@@ -2300,7 +2300,7 @@ Option<nlohmann::json> Collection::search(std::string raw_query,
 
     std::unique_ptr<search_args> search_params_guard(search_params);
 
-    auto search_op = index->run_search(search_params, name, facet_index_type);
+    auto search_op = index->run_search(search_params, this, facet_index_type);
 
     // filter_tree_root might be updated in Index::static_filter_query_eval.
     filter_tree_root_guard.release();
@@ -2824,7 +2824,18 @@ Option<nlohmann::json> Collection::search(std::string raw_query,
                 }
             }
         } else {
-            auto the_field = search_schema.at(a_facet.field_name);
+            field the_field;
+            if (a_facet.reference_collection_name.empty()) {
+                the_field = search_schema.at(a_facet.field_name);
+            } else {
+                auto& cm = CollectionManager::get_instance();
+                auto ref_collection = cm.get_collection(a_facet.reference_collection_name);
+                if (ref_collection == nullptr) {
+                    continue;
+                }
+
+                the_field = ref_collection->get_schema().at(a_facet.field_name);
+            }
             bool should_return_parent = std::find(facet_return_parent.begin(), facet_return_parent.end(),
                                                   the_field.name) != facet_return_parent.end();
             bool should_fetch_doc_from_store = ((a_facet.is_intersected && should_return_parent) || !a_facet.is_intersected);
@@ -3553,7 +3564,7 @@ Option<bool> Collection::get_filter_ids(const std::string& filter_query, filter_
 
 Option<bool> Collection::get_related_ids(const std::string& ref_field_name, const uint32_t& seq_id,
                                                std::vector<uint32_t>& result) const {
-    return index->get_related_ids(name, ref_field_name, seq_id, result);
+    return index->get_related_ids_with_lock(name, ref_field_name, seq_id, result);
 }
 
 Option<bool> Collection::get_object_array_related_id(const std::string& ref_field_name,
@@ -4521,7 +4532,7 @@ tsl::htrie_map<char, field> Collection::get_embedding_fields() {
     return embedding_fields;
 };
 
-tsl::htrie_set<char> Collection::get_object_reference_helper_fields() {
+tsl::htrie_set<char> Collection::get_object_reference_helper_fields() const {
     std::shared_lock lock(mutex);
     return object_reference_helper_fields;
 }
@@ -5124,7 +5135,7 @@ Option<bool> Collection::prune_ref_doc(nlohmann::json& doc,
     return Option<bool>(true);
 }
 
-Option<bool> Collection::include_references(nlohmann::json& doc, const uint32_t& seq_id, Collection *const collection,
+Option<bool> Collection::include_references(nlohmann::json& doc, const uint32_t& seq_id, Collection const *const collection,
                                             const std::map<std::string, reference_filter_result_t>& reference_filter_results,
                                             const std::vector<ref_include_exclude_fields>& ref_include_exclude_fields_vec) {
     for (auto const& ref_include_exclude: ref_include_exclude_fields_vec) {
@@ -5294,7 +5305,7 @@ Option<bool> Collection::prune_doc(nlohmann::json& doc,
                                    const tsl::htrie_set<char>& exclude_names,
                                    const std::string& parent_name, size_t depth,
                                    const std::map<std::string, reference_filter_result_t>& reference_filter_results,
-                                   Collection *const collection, const uint32_t& seq_id,
+                                   Collection const *const collection, const uint32_t& seq_id,
                                    const std::vector<ref_include_exclude_fields>& ref_include_exclude_fields_vec) {
     // doc can only be an object
     auto it = doc.begin();
@@ -6282,6 +6293,33 @@ Option<bool> Collection::parse_facet(const std::string& facet_field, std::vector
     return Option<bool>(true);
 }
 
+Option<bool> Collection::compute_facet_infos_with_lock(const std::vector<facet>& facets, facet_query_t& facet_query,
+                                                       const size_t facet_query_num_typos,
+                                                       const uint32_t* all_result_ids, const size_t& all_result_ids_len,
+                                                       const std::vector<std::string>& group_by_fields,
+                                                       size_t group_limit, bool is_wildcard_no_filter_query,
+                                                       size_t max_candidates,
+                                                       std::vector<facet_info_t>& facet_infos, facet_index_type_t facet_index_type) const {
+    std::shared_lock lock(mutex);
+    return index->compute_facet_infos_with_lock(facets, facet_query, facet_query_num_typos, all_result_ids, all_result_ids_len,
+                                                group_by_fields, group_limit, is_wildcard_no_filter_query,
+                                                max_candidates, facet_infos, facet_index_type, this);
+}
+
+Option<bool> Collection::do_facets_with_lock(std::vector<facet> & facets, facet_query_t & facet_query,
+                                             bool estimate_facets, size_t facet_sample_percent,
+                                             const std::vector<facet_info_t>& facet_infos,
+                                             size_t group_limit, const std::vector<std::string>& group_by_fields,
+                                             const bool group_missing_values,
+                                             const uint32_t* result_ids, size_t results_size,
+                                             int max_facet_count, bool is_wildcard_query,
+                                             facet_index_type_t facet_index_type) const {
+    std::shared_lock lock(mutex);
+    return index->do_facets_with_lock(facets, facet_query, estimate_facets, facet_sample_percent, facet_infos,
+                                      group_limit, group_by_fields, group_missing_values, result_ids, results_size,
+                                      max_facet_count, is_wildcard_query, facet_index_type, this);
+}
+
 Option<bool> Collection::populate_include_exclude_fields(const spp::sparse_hash_set<std::string>& include_fields,
                                                          const spp::sparse_hash_set<std::string>& exclude_fields,
                                                          tsl::htrie_set<char>& include_fields_full,
@@ -6468,7 +6506,7 @@ Option<std::string> Collection::get_referenced_in_field(const std::string& colle
 Option<bool> Collection::get_related_ids_with_lock(const std::string& field_name, const uint32_t& seq_id,
                                                    std::vector<uint32_t>& result) const {
     std::shared_lock lock(mutex);
-    return index->get_related_ids(name, field_name, seq_id, result);
+    return index->get_related_ids_with_lock(name, field_name, seq_id, result);
 }
 
 Option<uint32_t> Collection::get_sort_index_value_with_lock(const std::string& field_name,
