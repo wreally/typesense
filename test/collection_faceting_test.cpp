@@ -1355,6 +1355,113 @@ TEST_F(CollectionFacetingTest, FacetParseTest){
             FAIL();
         }
     }
+
+    fields = {
+            field("ref_score", field_types::INT32, true),
+            field("ref_grade", field_types::INT32, true),
+            field("ref_rank", field_types::INT32, true),
+            field("ref_range", field_types::INT32, true),
+            field("ref_scale", field_types::INT32, false),
+    };
+
+    collectionManager.create_collection("ref_coll", 1, fields).get();
+
+    range_facet_fields = {
+            "$ref_coll(ref_score(fail:[0, 40], pass:[40, 100]), ref_grade(A:[80, 100], B:[60, 80], C:[40, 60]))"
+    };
+    range_facets.clear();
+    for(const std::string & facet_field: range_facet_fields) {
+        coll1->parse_facet(facet_field, range_facets);
+    }
+    ASSERT_EQ(2, range_facets.size());
+
+    ASSERT_EQ("ref_score", range_facets[0].field_name);
+    ASSERT_TRUE(range_facets[0].is_range_query);
+    ASSERT_EQ(2, range_facets[0].facet_range_map.size());
+    ASSERT_EQ("ref_coll", range_facets[0].reference_collection_name);
+
+    ASSERT_EQ("ref_grade", range_facets[1].field_name);
+    ASSERT_TRUE(range_facets[1].is_range_query);
+    ASSERT_EQ(3, range_facets[1].facet_range_map.size());
+    ASSERT_EQ("ref_coll", range_facets[1].reference_collection_name);
+
+    normal_facet_fields = {
+            "$ref_coll(ref_score, ref_grade)"
+    };
+    normal_facets.clear();
+    for(const std::string & facet_field: normal_facet_fields) {
+        coll1->parse_facet(facet_field, normal_facets);
+    }
+    ASSERT_EQ(2, normal_facets.size());
+
+    ASSERT_EQ("ref_score", normal_facets[0].field_name);
+    ASSERT_EQ("ref_coll", normal_facets[0].reference_collection_name);
+    ASSERT_EQ("ref_grade", normal_facets[1].field_name);
+    ASSERT_EQ("ref_coll", normal_facets[1].reference_collection_name);
+
+    wildcard_facet_fields = {
+            "$ref_coll(ref_ran*, ref_sc*)",
+    };
+    wildcard_facets.clear();
+    for(const std::string & facet_field: wildcard_facet_fields) {
+        coll1->parse_facet(facet_field, wildcard_facets);
+    }
+
+    ASSERT_EQ(3, wildcard_facets.size());
+
+    expected = {"ref_range", "ref_rank", "ref_score"};
+    for (size_t i = 0; i < wildcard_facets.size(); i++) {
+        ASSERT_TRUE(expected.count(wildcard_facets[i].field_name) == 1);
+        ASSERT_EQ("ref_coll", wildcard_facets[i].reference_collection_name);
+    }
+
+    wildcard_facets.clear();
+    coll1->parse_facet("$ref_coll(*)", wildcard_facets);
+
+    // Last field is not a facet.
+    ASSERT_EQ(fields.size() - 1, wildcard_facets.size());
+
+    expected.clear();
+    for (size_t i = 0; i < fields.size() - 1; i++) {
+        expected.insert(fields[i].name);
+    }
+
+    for (size_t i = 0; i < wildcard_facets.size(); i++) {
+        ASSERT_TRUE(expected.count(wildcard_facets[i].field_name) == 1);
+        ASSERT_EQ("ref_coll", wildcard_facets[i].reference_collection_name);
+    }
+
+    mixed_facet_fields = {
+            "$ref_coll(ref_score, ref_grade(A:[80, 100], B:[60,  80], C:[40,60]), ref_ra*)",
+    };
+
+    mixed_facets.clear();
+    for(const std::string & facet_field: mixed_facet_fields) {
+        coll1->parse_facet(facet_field, mixed_facets);
+    }
+    ASSERT_EQ(4, mixed_facets.size());
+
+    mixed_facets_ptr.clear();
+    for(auto& f: mixed_facets) {
+        mixed_facets_ptr.push_back(&f);
+    }
+
+    std::sort(mixed_facets_ptr.begin(), mixed_facets_ptr.end(), [](const facet* f1, const facet* f2) {
+        return f1->field_name < f2->field_name;
+    });
+
+    ASSERT_EQ("ref_score", mixed_facets_ptr[3]->field_name);
+    ASSERT_EQ("ref_coll", mixed_facets_ptr[3]->reference_collection_name);
+
+    ASSERT_EQ("ref_grade", mixed_facets_ptr[0]->field_name);
+    ASSERT_TRUE(mixed_facets_ptr[0]->is_range_query);
+    ASSERT_GT(mixed_facets_ptr[0]->facet_range_map.size(), 0);
+    ASSERT_EQ("ref_coll", mixed_facets_ptr[0]->reference_collection_name);
+
+    ASSERT_EQ("ref_rank", mixed_facets_ptr[2]->field_name);
+    ASSERT_EQ("ref_coll", mixed_facets_ptr[2]->reference_collection_name);
+    ASSERT_EQ("ref_range", mixed_facets_ptr[1]->field_name);
+    ASSERT_EQ("ref_coll", mixed_facets_ptr[1]->reference_collection_name);
 }
 
 TEST_F(CollectionFacetingTest, RangeFacetTest) {

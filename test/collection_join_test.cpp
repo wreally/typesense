@@ -4990,3 +4990,102 @@ TEST_F(CollectionJoinTest, QueryByReference) {
     ASSERT_FALSE(search_op.ok());
     ASSERT_EQ("Could not find `$Customers(customer_name` field in the schema.", search_op.error());
 }
+
+//TEST_F(CollectionJoinTest, FacetByReference) {
+//    auto schema_json =
+//        R"({
+//            "name": "Products",
+//            "fields": [
+//                {"name": "product_id", "type": "string"},
+//                {"name": "product_name", "type": "string"},
+//                {"name": "product_description", "type": "string"},
+//                {"name": "rating", "type": "int32", "facet": true}
+//            ]
+//        })"_json;
+//    std::vector<nlohmann::json> documents = {
+//            R"({
+//            "product_id":  "product_a",
+//            "product_name": "shampoo",
+//            "product_description": "Our new moisturizing shampoo is perfect for those with dry or damaged hair.",
+//            "rating": "2"
+//        })"_json,
+//            R"({
+//            "product_id": "product_b",
+//            "product_name": "soap",
+//            "product_description": "Introducing our all-natural, organic soap bar made with essential oils and botanical ingredients.",
+//            "rating": "4"
+//        })"_json
+//    };
+//    auto collection_create_op = collectionManager.create_collection(schema_json);
+//    ASSERT_TRUE(collection_create_op.ok());
+//    for (auto const &json: documents) {
+//        auto add_op = collection_create_op.get()->add(json.dump());
+//        if (!add_op.ok()) {
+//            LOG(INFO) << add_op.error();
+//        }
+//        ASSERT_TRUE(add_op.ok());
+//    }
+//
+//    schema_json =
+//            R"({
+//            "name": "Customers",
+//            "fields": [
+//                {"name": "customer_id", "type": "string"},
+//                {"name": "customer_name", "type": "string"},
+//                {"name": "product_price", "type": "float", "facet": true},
+//                {"name": "product_id", "type": "string", "reference": "Products.product_id"}
+//            ]
+//        })"_json;
+//    documents = {
+//            R"({
+//            "customer_id": "customer_a",
+//            "customer_name": "Joe",
+//            "product_price": 143,
+//            "product_id": "product_a"
+//        })"_json,
+//            R"({
+//            "customer_id": "customer_a",
+//            "customer_name": "Joe",
+//            "product_price": 73.5,
+//            "product_id": "product_b"
+//        })"_json,
+//            R"({
+//            "customer_id": "customer_b",
+//            "customer_name": "Dan",
+//            "product_price": 75,
+//            "product_id": "product_a"
+//        })"_json,
+//            R"({
+//            "customer_id": "customer_b",
+//            "customer_name": "Dan",
+//            "product_price": 140,
+//            "product_id": "product_b"
+//        })"_json
+//    };
+//    collection_create_op = collectionManager.create_collection(schema_json);
+//    ASSERT_TRUE(collection_create_op.ok());
+//    for (auto const &json: documents) {
+//        auto add_op = collection_create_op.get()->add(json.dump());
+//        if (!add_op.ok()) {
+//            LOG(INFO) << add_op.error();
+//        }
+//        ASSERT_TRUE(add_op.ok());
+//    }
+//
+//    std::map<std::string, std::string> req_params = {
+//            {"collection", "Products"},
+//            {"q", "*"},
+//            {"filter_by", "$Customers(customer_id: customer_a)"},
+//            {"facet_by", "$Customers(product_price)"}
+//    };
+//    nlohmann::json embedded_params;
+//    std::string json_res;
+//    auto now_ts = std::chrono::duration_cast<std::chrono::microseconds>(
+//            std::chrono::system_clock::now().time_since_epoch()).count();
+//
+//    auto search_op = collectionManager.do_search(req_params, embedded_params, json_res, now_ts);
+//    ASSERT_TRUE(search_op.ok());
+//
+//    nlohmann::json res_obj = nlohmann::json::parse(json_res);
+//    LOG(INFO) << res_obj.dump();
+//}

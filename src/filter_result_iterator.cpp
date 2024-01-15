@@ -1691,9 +1691,7 @@ void filter_result_iterator_t::get_n_ids(const uint32_t& n, filter_result_t*& re
         }
 
         auto& result_reference = result->coll_to_references[i];
-        // Moving references since get_n_ids is only called in wildcard search flow and filter_result_iterator is
-        // not used afterwards.
-        result_reference = std::move(filter_result.coll_to_references[result_index]);
+        result_reference = filter_result.coll_to_references[result_index];
     }
 
     if (!override_timeout) {
@@ -1754,9 +1752,7 @@ void filter_result_iterator_t::get_n_ids(const uint32_t& n,
         }
 
         auto& result_reference = result->coll_to_references[i];
-        // Moving references since get_n_ids is only called in wildcard search flow and filter_result_iterator is
-        // not used afterwards.
-        result_reference = std::move(filter_result.coll_to_references[match_index]);
+        result_reference = filter_result.coll_to_references[match_index];
     }
 
     if (!override_timeout) {
@@ -1818,9 +1814,9 @@ void filter_result_iterator_t::compute_result() {
         is_filter_result_initialized = false;
         LOG(ERROR) << "filter_node is null";
         return;
-    }
-
-    if (timeout_info != nullptr && is_timed_out()) {
+    } else if (is_filter_result_initialized) { // Filter result is already computed.
+        return;
+    } else if (timeout_info != nullptr && is_timed_out()) {
         return;
     }
 
@@ -1855,13 +1851,13 @@ void filter_result_iterator_t::compute_result() {
         return;
     }
 
-    // Only string field filter needs to be evaluated.
-    if (is_filter_result_initialized || index->search_index.count(filter_node->filter_exp.field_name) == 0) {
+    if (index->search_index.count(filter_node->filter_exp.field_name) == 0) {
         return;
     }
 
-    // Resetting posting_list_iterators.
+    // Only string field filter needs to be evaluated. For other fields `is_filter_result_initialized` would be true.
     for (uint32_t i = 0; i < posting_lists.size(); i++) {
+        // Resetting posting_list_iterators.
         auto const& plists = posting_lists[i];
 
         posting_list_iterators[i].clear();

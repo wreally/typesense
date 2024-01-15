@@ -582,16 +582,42 @@ Option<bool> StringUtils::split_include_exclude_fields(const std::string& includ
 size_t StringUtils::split_facet(const std::string &s, std::vector<std::string> &result, const bool keep_empty,
                                 const size_t start_index, const size_t max_values) {
 
-
     std::string::const_iterator substart = s.begin()+start_index, subend;
     size_t end_index = start_index;
     std::string delim(""), temp("");
     std::string current_str=s;
+    trim(current_str);
+
     while (true) {
         auto range_pos = current_str.find("(");
         auto normal_pos = current_str.find(",");
 
-        if(range_pos == std::string::npos && normal_pos == std::string::npos){
+        if(current_str[0] == '$'){ // Reference facet_by
+            if(range_pos == std::string::npos){
+                break;
+            }
+
+            auto index = range_pos + 1;
+            int paren_count = 1;
+            while (++index < s.size() && paren_count > 0) {
+                if (s[index] == '(') {
+                    paren_count++;
+                } else if (s[index] == ')') {
+                    paren_count--;
+                }
+            }
+
+            if (paren_count != 0) {
+                return 0;
+            }
+
+            temp = delim = current_str.substr(0, index);
+            subend = substart + delim.size();
+
+            while (subend != s.end() && *(subend++) != ',');
+            delim.clear();
+        }
+        else if(range_pos == std::string::npos && normal_pos == std::string::npos){
             if(!current_str.empty()){
                 result.push_back(trim(current_str));
             }
@@ -623,6 +649,8 @@ size_t StringUtils::split_facet(const std::string &s, std::vector<std::string> &
             break;
         }
         substart = subend + delim.size();
+        while (*substart == ' ' && ++substart != s.end());
+
         current_str = std::string(substart, s.end());
     }
 
