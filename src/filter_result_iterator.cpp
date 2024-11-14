@@ -687,17 +687,6 @@ void filter_result_iterator_t::next() {
 
     const filter a_filter = filter_node->filter_exp;
 
-    if (a_filter.field_name == "id") {
-        all_seq_ids_iterator.next();
-        if (!all_seq_ids_iterator.valid()) {
-            validity = invalid;
-            return;
-        }
-
-        seq_id = all_seq_ids_iterator.id();
-        return;
-    }
-
     if (!index->field_is_indexed(a_filter.field_name)) {
         validity = invalid;
         return;
@@ -882,52 +871,29 @@ void filter_result_iterator_t::init(const bool& enable_lazy_evaluation) {
 
     if (a_filter.field_name == "id") {
         // we handle `ids` separately
-        if (!a_filter.values.empty() && a_filter.values.front() == "*") {
-            if (a_filter.apply_not_equals) {
-                is_filter_result_initialized = true;
-                validity = invalid;
-                return;
-            }
-
-            if (enable_lazy_evaluation) {
-                all_seq_ids_iterator = index->seq_ids->new_iterator();
-                if (all_seq_ids_iterator.valid()) {
-                    seq_id = all_seq_ids_iterator.id();
-                    approx_filter_ids_length = index->seq_ids->num_ids();
-                    validity = valid;
-                } else {
-                    validity = invalid;
-                }
-                return;
-            } else {
-                filter_result.count = index->seq_ids->num_ids();
-                filter_result.docs = index->seq_ids->uncompress();
-            }
-        } else {
-            std::vector<uint32_t> result_ids;
-            for (const auto& id_str : a_filter.values) {
-                result_ids.push_back(std::stoul(id_str));
-            }
-
-            std::sort(result_ids.begin(), result_ids.end());
-
-            filter_result.count = result_ids.size();
-            filter_result.docs = new uint32_t[result_ids.size()];
-            std::copy(result_ids.begin(), result_ids.end(), filter_result.docs);
+        std::vector<uint32_t> result_ids;
+        for (const auto& id_str : a_filter.values) {
+            result_ids.push_back(std::stoul(id_str));
         }
+
+        std::sort(result_ids.begin(), result_ids.end());
+
+        filter_result.count = result_ids.size();
+        filter_result.docs = new uint32_t[result_ids.size()];
+        std::copy(result_ids.begin(), result_ids.end(), filter_result.docs);
 
         if (a_filter.apply_not_equals) {
             apply_not_equals(index->seq_ids->uncompress(), index->seq_ids->num_ids(),
                              filter_result.docs, filter_result.count);
         }
 
-        is_filter_result_initialized = true;
         if (filter_result.count == 0) {
             validity = invalid;
             return;
         }
 
         seq_id = filter_result.docs[result_index];
+        is_filter_result_initialized = true;
         approx_filter_ids_length = filter_result.count;
         return;
     }
@@ -1667,17 +1633,6 @@ void filter_result_iterator_t::skip_to(uint32_t id) {
 
     const filter a_filter = filter_node->filter_exp;
 
-    if (a_filter.field_name == "id") {
-        all_seq_ids_iterator.skip_to(id);
-        if (!all_seq_ids_iterator.valid()) {
-            validity = invalid;
-            return;
-        }
-
-        equals_iterator_id = seq_id = all_seq_ids_iterator.id();
-        return;
-    }
-
     if (!index->field_is_indexed(a_filter.field_name)) {
         validity = invalid;
         return;
@@ -2084,19 +2039,6 @@ void filter_result_iterator_t::reset(const bool& override_timeout) {
     }
 
     const filter a_filter = filter_node->filter_exp;
-
-    if (a_filter.field_name == "id") {
-        all_seq_ids_iterator = index->seq_ids->new_iterator();
-        if (all_seq_ids_iterator.valid()) {
-            seq_id = all_seq_ids_iterator.id();
-            approx_filter_ids_length = index->seq_ids->num_ids();
-            validity = valid;
-        } else {
-            validity = invalid;
-        }
-
-        return;
-    }
 
     if (!index->field_is_indexed(a_filter.field_name)) {
         return;
@@ -2546,38 +2488,11 @@ void filter_result_iterator_t::compute_iterators() {
         return;
     }
 
+    if (index->search_schema.count(filter_node->filter_exp.field_name) == 0) {
+        return;
+    }
+
     const filter a_filter = filter_node->filter_exp;
-
-    if (a_filter.field_name == "id") {
-        if (index->seq_ids->num_ids() == 0) {
-            validity = invalid;
-            return;
-        }
-
-        filter_result.docs = index->seq_ids->uncompress();
-        filter_result.count = index->seq_ids->num_ids();
-
-        if (timeout_info != nullptr) {
-            is_timed_out(true);
-        }
-
-        if (validity != timed_out && filter_result.count == 0) {
-            validity = invalid;
-            return;
-        }
-
-        result_index = 0;
-        seq_id = filter_result.docs[result_index];
-        is_filter_result_initialized = true;
-        approx_filter_ids_length = filter_result.count;
-
-        return;
-    }
-
-    if (index->search_schema.count(a_filter.field_name) == 0) {
-        return;
-    }
-
     field f = index->search_schema.at(a_filter.field_name);
 
     if (f.is_integer() || f.is_float()) {
@@ -2777,7 +2692,7 @@ void filter_result_iterator_t::compute_iterators() {
         }
     }
 
-    if (validity != timed_out && filter_result.count == 0) {
+    if (filter_result.count == 0) {
         validity = invalid;
         return;
     }

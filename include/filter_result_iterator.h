@@ -249,9 +249,6 @@ private:
     /// Used in case of id and reference filter.
     uint32_t result_index = 0;
 
-    /// Initialized in case of `id: *` filter.
-    id_list_t::iterator_t all_seq_ids_iterator = id_list_t::iterator_t(nullptr, nullptr, nullptr, false);
-
     /// Stores the result of the filters that cannot be iterated.
     filter_result_t filter_result;
     bool is_filter_result_initialized = false;

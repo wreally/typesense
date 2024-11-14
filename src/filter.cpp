@@ -426,7 +426,11 @@ Option<bool> toFilter(const std::string expression,
         filter_exp = {field_name, {}, {}};
         NUM_COMPARATOR id_comparator = EQUALS;
         size_t filter_value_index = 0;
-        if (raw_value[0] == '=') {
+        if (raw_value == "*") { // Match all.
+            // NOT_EQUALS comparator with no id match will get all the ids.
+            id_comparator = NOT_EQUALS;
+            filter_exp.apply_not_equals = true;
+        } else if (raw_value[0] == '=') {
             id_comparator = EQUALS;
             while (++filter_value_index < raw_value.size() && raw_value[filter_value_index] == ' ');
         } else if (raw_value.size() >= 2 && raw_value[0] == '!' && raw_value[1] == '=') {
@@ -445,15 +449,6 @@ Option<bool> toFilter(const std::string expression,
             std::vector<std::string> doc_ids;
             StringUtils::split_to_values(raw_value.substr(1, raw_value.size() - 2), doc_ids);
             for (std::string& doc_id: doc_ids) {
-                if (doc_id == "*") {
-                    filter_exp.values.clear();
-                    filter_exp.values.emplace_back("*");
-
-                    filter_exp.comparators.clear();
-                    filter_exp.comparators.push_back(id_comparator);
-                    break;
-                }
-
                 // we have to convert the doc_id to seq id
                 std::string seq_id_str;
                 StoreStatus seq_id_status = store->get(doc_id_prefix + doc_id, seq_id_str);
@@ -470,16 +465,11 @@ Option<bool> toFilter(const std::string expression,
                 return Option<bool>(400, empty_filter_err);
             }
 
-            if (doc_ids[0] == "*") {
-                filter_exp.values.emplace_back("*");
+            std::string seq_id_str;
+            StoreStatus seq_id_status = store->get(doc_id_prefix + doc_ids[0], seq_id_str);
+            if (seq_id_status == StoreStatus::FOUND) {
+                filter_exp.values.push_back(seq_id_str);
                 filter_exp.comparators.push_back(id_comparator);
-            } else {
-                std::string seq_id_str;
-                StoreStatus seq_id_status = store->get(doc_id_prefix + doc_ids[0], seq_id_str);
-                if (seq_id_status == StoreStatus::FOUND) {
-                    filter_exp.values.push_back(seq_id_str);
-                    filter_exp.comparators.push_back(id_comparator);
-                }
             }
         }
         return Option<bool>(true);

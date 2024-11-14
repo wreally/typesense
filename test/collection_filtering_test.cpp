@@ -1448,25 +1448,6 @@ TEST_F(CollectionFilteringTest, FilteringViaDocumentIds) {
 
     ASSERT_EQ(4, results["found"].get<size_t>());
 
-    results = coll1->search("*",
-                            {}, "id:= [*]",
-                            {}, sort_fields, {0}, 10, 1, FREQUENCY, {true}).get();
-
-    ASSERT_EQ(4, results["found"].get<size_t>());
-
-    // match no IDs
-    results = coll1->search("*",
-                            {}, "id: != *",
-                            {}, sort_fields, {0}, 10, 1, FREQUENCY, {true}).get();
-
-    ASSERT_EQ(0, results["found"].get<size_t>());
-
-    results = coll1->search("*",
-                            {}, "id: != [*]",
-                            {}, sort_fields, {0}, 10, 1, FREQUENCY, {true}).get();
-
-    ASSERT_EQ(0, results["found"].get<size_t>());
-
     collectionManager.drop_collection("coll1");
 }
 
