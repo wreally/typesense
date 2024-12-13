@@ -3245,7 +3245,10 @@ bool post_personalization_model(const std::shared_ptr<http_req>& req, const std:
     }
     
     auto model = create_op.get();
-    res->set_200(nlohmann::json{{"ok", true}, {"model_id", model}}.dump());
+    if (model.contains("model_path")) {
+        model.erase("model_path");
+    }
+    res->set_200(model.dump());
     
     return true;
 }
@@ -3335,4 +3338,58 @@ bool put_personalization_model(const std::shared_ptr<http_req>& req, const std::
     }
     res->set_200(response.dump());
     return true;
+}
+
+// Helper function to generate random input vector
+std::vector<float> generate_random_vector(size_t size) {
+    std::vector<float> vec(size);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dis(-1.0, 1.0);
+    
+    for (size_t i = 0; i < size; i++) {
+        vec[i] = dis(gen);
+    }
+    return vec;
+}
+
+bool test_personalization_model(const std::shared_ptr<http_req>& req, const std::shared_ptr<http_res>& res) {
+    const std::string& model_id = req->params["id"];
+    auto model = PersonalizationModelManager::get_model_embedder(model_id);
+    if (model == nullptr) {
+        res->set(404, "Model not found");
+        return false;
+    }
+
+    try {
+        // Test single vector embedding
+        auto input_vec = generate_random_vector(model->get_input_dims());
+        auto output_vec = model->embed_vector(input_vec);
+
+        // Test batch vector embedding
+        std::vector<std::vector<float>> batch_input;
+        const size_t batch_size = 3;
+        for (size_t i = 0; i < batch_size; i++) {
+            batch_input.push_back(generate_random_vector(model->get_input_dims()));
+        }
+        auto batch_output = model->batch_embed_vectors(batch_input);
+
+        // Validate model I/O
+        auto validation_result = model->validate_model_io();
+        if (!validation_result.ok()) {
+            res->set(400, validation_result.error());
+            return false;
+        }
+
+        nlohmann::json response;
+        response["message"] = "Model test successful";
+        response["single_output_size"] = output_vec.embedding.size();
+        response["batch_output_size"] = batch_output.size();
+        res->set_200(response.dump());
+        return true;
+
+    } catch (const std::exception& e) {
+        res->set(500, std::string("Error testing model: ") + e.what());
+        return false;
+    }
 }

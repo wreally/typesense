@@ -588,7 +588,13 @@ public:
                                   bool enable_typos_for_alpha_numerical_tokens = true,
                                   const size_t& max_filter_by_candidates = DEFAULT_FILTER_BY_CANDIDATES,
                                   bool rerank_hybrid_matches = false,
-                                  bool validate_field_names = true) const;
+                                  bool validate_field_names = true,
+                                  const std::string& user_id = "",
+                                  const std::string& personalization_model_id = "",
+                                  const std::string& personalization = "",
+                                  const std::string& personalization_event_name = "",
+                                  const size_t n_events = 3
+                                  ) const;
 
     Option<bool> get_filter_ids(const std::string & filter_query, filter_result_t& filter_result,
                                 const bool& should_timeout = true, const bool& validate_field_names = true) const;

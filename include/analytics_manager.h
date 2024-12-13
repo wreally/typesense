@@ -226,6 +226,8 @@ public:
 
     Option<nlohmann::json> get_events(uint32_t N);
 
+    Option<event_type_collection> get_event_details(const std::string& event_name);
+
 #ifdef TEST_BUILD
     std::unordered_map<std::string, std::vector<event_t>> get_log_events() {
         return query_collection_events;

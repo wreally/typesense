@@ -23,6 +23,10 @@
 #include "conversation_model.h"
 #include "conversation_manager.h"
 #include "conversation_model_manager.h"
+#include "personalization_model_manager.h"
+#include "personalization_model.h"
+#include "analytics_manager.h"
+#include "text_embedder.h"
 #include "field.h"
 #include "join.h"
 
@@ -1810,7 +1814,12 @@ Option<nlohmann::json> Collection::search(std::string raw_query,
                                   bool enable_typos_for_alpha_numerical_tokens,
                                   const size_t& max_filter_by_candidates,
                                   bool rerank_hybrid_matches,
-                                  bool validate_field_names) const {
+                                  bool validate_field_names,
+                                  const std::string& personalization_model_id,
+                                  const std::string& user_id,
+                                  const std::string& personalization,
+                                  const std::string& personalization_event_name,
+                                  size_t n_events) const {
     std::shared_lock lock(mutex);
 
     // setup thread local vars
@@ -1933,6 +1942,56 @@ Option<nlohmann::json> Collection::search(std::string raw_query,
         conversation_standalone_query = query;
     }
 
+    
+    if (!personalization.empty() && (personalization != "recommendation" && personalization != "search")) {
+        return Option<nlohmann::json>(400, "Invalid personalization type. Please use `recommendation` or `search`.");
+    }
+
+    if (personalization == "recommendation" || personalization == "search") {
+        if (user_id.empty()) {
+            return Option<nlohmann::json>(400, "Personalization is enabled but no user ID is provided.");
+        }
+        if (personalization_model_id.empty()) {
+            return Option<nlohmann::json>(400, "Personalization is enabled but no personalization model ID is provided.");
+        }
+
+        if (raw_search_fields.empty()) {
+            return Option<nlohmann::json>(400, "Personalization is enabled but no search fields are provided.");
+        }
+
+        if(raw_search_fields.size() > 1) {
+            return Option<nlohmann::json>(400, "Personalization is enabled but only one embedding field is allowed.");
+        }
+
+        if (personalization_event_name.empty()) {
+            return Option<nlohmann::json>(400, "Personalization is enabled but no analytics `event_name` is provided.");
+        }
+
+        auto event_details_op = AnalyticsManager::get_instance().get_event_details(personalization_event_name);
+        if(!event_details_op.ok()) {
+            return Option<nlohmann::json>(400, event_details_op.error());
+        }
+
+        auto event_details = event_details_op.get();
+        if(std::find(event_details.src_collections.begin(), event_details.src_collections.end(), name) == event_details.src_collections.end()) {
+            return Option<nlohmann::json>(400, "Collection `" + name + "` is not part of the source collections for event `" + personalization_event_name + "`");
+        }
+
+        const std::string& field_name = raw_search_fields[0];
+        if(search_schema.count(field_name) == 0) {
+            return Option<nlohmann::json>(404, "Could not find `" + field_name + "` field in the schema.");
+        }
+
+        const field& search_field = search_schema.at(field_name);
+        if(search_field.num_dim == 0) {
+            return Option<nlohmann::json>(400, "Field `" + field_name + "` is not an embedding field.");
+        }
+
+        if (query != "*" && personalization == "recommendation") {
+            return Option<nlohmann::json>(400, "Recommendation personalization is enabled. Please use a wildcard query.");
+        }
+    }
+
     bool ignored_missing_fields = false;
 
     for(size_t i = 0; i < raw_search_fields.size(); i++) {
@@ -2045,6 +2104,59 @@ Option<nlohmann::json> Collection::search(std::string raw_query,
                                                  query_weight, num_typo, prefix, infix);
             if(!raw_query_by_weights.empty()) {
                 query_by_weights.push_back(query_weight);
+            }
+        }
+    }
+
+    if (personalization == "search" || personalization == "recommendation") {
+        vector_query.field_name = raw_search_fields[0];
+        std::shared_ptr<PersonalizationModel> personalization_embedder = PersonalizationModelManager::get_model_embedder(personalization_model_id);
+        if(personalization_embedder == nullptr) {
+            return Option<nlohmann::json>(404, "Could not find personalization model with ID: " + personalization_model_id);
+        }
+        std::vector<std::string> events;
+        AnalyticsManager::get_instance().get_last_N_events(user_id, personalization_event_name, n_events, events);
+        if (events.empty()) {
+            return Option<nlohmann::json>(404, "No events found for user `" + user_id + "` and event `" + personalization_event_name + "`");
+        }
+        std::vector<std::string> doc_ids;
+        for(const auto& event_str: events) {
+            auto event_json = nlohmann::json::parse(event_str);
+            if(event_json.contains("doc_id") && !event_json["doc_id"].empty()) {
+                doc_ids.push_back(event_json["doc_id"].get<std::string>());
+            }
+        }
+        std::vector<std::vector<float>> document_embeddings;
+        for(const auto& doc_id: doc_ids) {
+            Option<nlohmann::json> doc_op = get(doc_id);
+            if(!doc_op.ok()) {
+                return Option<nlohmann::json>(400, "Error in finding `" + doc_id + "` for personalization.");
+            }
+            auto doc_json = doc_op.get();
+            auto doc_embedding = doc_json[vector_query.field_name].get<std::vector<float>>();
+            document_embeddings.push_back(doc_embedding);
+        }
+        std::vector<int64_t> attention_mask(document_embeddings.size(), 1);
+        auto pooled_embedding = TextEmbedder::mean_pooling(document_embeddings, attention_mask);
+        vector_query.values = pooled_embedding;
+        if (personalization == "recommendation") {
+            embedding_res_t query_embedding = personalization_embedder->embed_vector(pooled_embedding);
+            if(query_embedding.success) {
+                vector_query.values = query_embedding.embedding;
+            } else {
+                return Option<nlohmann::json>(400, query_embedding.error.dump());
+            }
+        }
+
+        if (personalization == "search") {
+            std::vector<float> combined_embedding;
+            combined_embedding.insert(combined_embedding.end(), vector_query.values.begin(), vector_query.values.end());
+            combined_embedding.insert(combined_embedding.end(), pooled_embedding.begin(), pooled_embedding.end());
+            embedding_res_t query_embedding = personalization_embedder->embed_vector(combined_embedding);
+            if(query_embedding.success) {
+                vector_query.values = query_embedding.embedding;
+            } else {
+                return Option<nlohmann::json>(400, query_embedding.error.dump());
             }
         }
     }

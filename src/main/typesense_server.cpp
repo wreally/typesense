@@ -115,6 +115,8 @@ void master_server_routes() {
     server->get("/personalization/models/:id", get_personalization_model);
     server->del("/personalization/models/:id", del_personalization_model);
     server->put("/personalization/models/:id", put_personalization_model);
+    server->get("/personalization/models/:id/test", test_personalization_model);
+    
 
     server->get("/limits", get_rate_limits);
     server->get("/limits/active", get_active_throttles);

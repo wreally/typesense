@@ -11,11 +11,11 @@ Option<nlohmann::json> PersonalizationModelManager::get_model(const std::string&
     return Option<nlohmann::json>(it->second);
 }
 
-Option<std::string> PersonalizationModelManager::add_model(nlohmann::json& model_json, std::string model_id, const bool write_to_disk, const std::string model_data) {
+Option<nlohmann::json> PersonalizationModelManager::add_model(nlohmann::json& model_json, std::string model_id, const bool write_to_disk, const std::string model_data) {
     std::unique_lock lock(models_mutex);
 
     if (models.find(model_id) != models.end()) {
-        return Option<std::string>(409, "Model id already exists");
+        return Option<nlohmann::json>(409, "Model id already exists");
     }
 
     model_json["id"] = model_id.empty() ? sole::uuid4().str() : model_id;
@@ -24,23 +24,31 @@ Option<std::string> PersonalizationModelManager::add_model(nlohmann::json& model
 
     auto validate_op = PersonalizationModel::validate_model(model_json);
     if(!validate_op.ok()) {
-        return Option<std::string>(validate_op.code(), validate_op.error());
+        return Option<nlohmann::json>(validate_op.code(), validate_op.error());
     }
 
     if(write_to_disk) {
         auto model_key = get_model_key(model_json["id"]);
         auto create_op = PersonalizationModel::create_model(model_json["id"], model_json, model_data);
         if(!create_op.ok()) {
-            return Option<std::string>(create_op.code(), create_op.error());
+            return Option<nlohmann::json>(create_op.code(), create_op.error());
         }
+        model_json = create_op.get();
         bool insert_op = store->insert(model_key, model_json.dump(0));
         if(!insert_op) {
-            return Option<std::string>(500, "Error while inserting model into the store");
+            return Option<nlohmann::json>(500, "Error while inserting model into the store");
         }
     }
     models[model_json["id"]] = model_json;
-
-    return Option<std::string>(model_id);
+    try {
+        model_embedders.emplace(model_id, std::make_shared<PersonalizationModel>(model_id));
+        LOG(INFO) << "Created model embedder for model: " << model_id;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Error creating model embedder for model: " << model_id << ", error: " << e.what();
+        return Option<nlohmann::json>(500, std::string("Error creating model embedder: ") + e.what());
+    }
+    
+    return Option<nlohmann::json>(model_json);
 }
 
 Option<int> PersonalizationModelManager::init(Store* store) {
@@ -72,6 +80,14 @@ Option<int> PersonalizationModelManager::init(Store* store) {
             continue;
         }
 
+        try {
+            model_embedders.emplace(model_id, std::make_shared<PersonalizationModel>(model_id));
+            LOG(INFO) << "Loaded model embedder for model: " << model_id;
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "Error loading model embedder for model: " << model_id << ", error: " << e.what();
+            continue;
+        }
+
         loaded_models++;
     }
 
@@ -86,6 +102,9 @@ Option<nlohmann::json> PersonalizationModelManager::delete_model(const std::stri
     }
 
     nlohmann::json model = it->second;
+
+    // Remove model embedder if present
+    model_embedders.erase(model_id);
 
     auto delete_op = PersonalizationModel::delete_model(model_id);
     if(!delete_op.ok()) {
@@ -133,18 +152,50 @@ Option<nlohmann::json> PersonalizationModelManager::update_model(const std::stri
         return Option<nlohmann::json>(validate_res.code(), validate_res.error());
     }
 
+    auto update_op = PersonalizationModel::update_model(model_id, model_copy, model_data);
+    model_copy = update_op.get();
+    if(!update_op.ok()) {
+        return Option<nlohmann::json>(update_op.code(), update_op.error());
+    }
+
+    // If model was loaded and model data changed, reload the embedder
+    if (!model_data.empty()) {
+        auto embedder_it = model_embedders.find(model_id);
+        if (embedder_it != model_embedders.end()) {
+            try {
+                // Explicitly reset the old model to release memory
+                model_embedders[model_id] = std::make_shared<PersonalizationModel>(model_id);
+            } catch (const std::exception& e) {
+                LOG(ERROR) << "Failed to reload model embedder after update: " << e.what();
+                model_embedders.erase(model_id);
+            }
+        }
+    }
+
+    models[model_id] = model_copy;
     auto model_key = get_model_key(model_id);
     bool insert_op = store->insert(model_key, model_copy.dump(0));
     if(!insert_op) {
         return Option<nlohmann::json>(500, "Error while inserting model into the store");
     }
+    return Option<nlohmann::json>(model_copy);
+}
 
-    auto update_op = PersonalizationModel::update_model(model_id, model_copy, model_data);
-    if(!update_op.ok()) {
-        return Option<nlohmann::json>(update_op.code(), update_op.error());
+std::shared_ptr<PersonalizationModel> PersonalizationModelManager::get_model_embedder(const std::string& model_id) {
+    std::shared_lock lock(models_mutex);
+    
+    // First check if model exists in our metadata
+    auto it = models.find(model_id);
+    if (it == models.end()) {
+        return nullptr;
     }
 
-    models[model_id] = model_copy;
+    // Check if model embedder already exists
+    auto embedder_it = model_embedders.find(model_id);
+    if (embedder_it != model_embedders.end()) {
+        return embedder_it->second;
+    }
 
-    return Option<nlohmann::json>(model_copy);
+    // If model is not already loaded, return nullptr
+    return nullptr;
 }

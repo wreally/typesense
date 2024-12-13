@@ -1308,6 +1308,13 @@ Option<bool> CollectionManager::do_search(std::map<std::string, std::string>& re
 
     const char* VALIDATE_FIELD_NAMES = "validate_field_names";
 
+    // Personalization params
+    const char* PERSONALIZATION_MODEL_ID = "personalization_model_id";
+    const char* USER_ID = "user_id";
+    const char* PERSONALIZATION = "personalization";
+    const char* N_EVENTS = "n";
+    const char* PERSONALIZATION_EVENT_NAME = "event_name";
+
     // enrich params with values from embedded params
     for(auto& item: embedded_params.items()) {
         if(item.key() == "expires_at") {
@@ -1458,6 +1465,12 @@ Option<bool> CollectionManager::do_search(std::map<std::string, std::string>& re
     bool rerank_hybrid_matches = false;
     bool validate_field_names = true;
 
+    size_t n_events = 3;
+    std::string personalization_event_name;
+    std::string user_id;
+    std::string personalization;
+    std::string personalization_model_id;
+
     std::unordered_map<std::string, size_t*> unsigned_int_values = {
         {MIN_LEN_1TYPO, &min_len_1typo},
         {MIN_LEN_2TYPO, &min_len_2typo},
@@ -1482,7 +1495,8 @@ Option<bool> CollectionManager::do_search(std::map<std::string, std::string>& re
         {REMOTE_EMBEDDING_TIMEOUT_MS, &remote_embedding_timeout_ms},
         {REMOTE_EMBEDDING_NUM_TRIES, &remote_embedding_num_tries},
         {SYNONYM_NUM_TYPOS, &synonym_num_typos},
-        {MAX_FILTER_BY_CANDIDATES, &max_filter_by_candidates}
+        {MAX_FILTER_BY_CANDIDATES, &max_filter_by_candidates},
+        {N_EVENTS, &n_events}
     };
 
     std::unordered_map<std::string, std::string*> str_values = {
@@ -1501,6 +1515,10 @@ Option<bool> CollectionManager::do_search(std::map<std::string, std::string>& re
         {CONVERSATION_MODEL_ID, &conversation_model_id},
         {VOICE_QUERY, &voice_query},
         {FACET_STRATEGY, &facet_strategy},
+        {PERSONALIZATION_MODEL_ID, &personalization_model_id},
+        {USER_ID, &user_id},
+        {PERSONALIZATION, &personalization},
+        {PERSONALIZATION_EVENT_NAME, &personalization_event_name}
     };
 
     std::unordered_map<std::string, bool*> bool_values = {
@@ -1744,7 +1762,12 @@ Option<bool> CollectionManager::do_search(std::map<std::string, std::string>& re
                                                           enable_typos_for_alpha_numerical_tokens,
                                                           max_filter_by_candidates,
                                                           rerank_hybrid_matches,
-                                                          validate_field_names);
+                                                          validate_field_names,
+                                                          user_id,
+                                                          personalization_model_id,
+                                                          personalization,
+                                                          personalization_event_name,
+                                                          n_events);
 
     uint64_t timeMillis = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - begin).count();

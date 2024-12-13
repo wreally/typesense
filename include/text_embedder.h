@@ -41,6 +41,8 @@ class TextEmbedder {
         bool update_remote_embedder_apikey(const std::string& api_key) {
             return remote_embedder_->update_api_key(api_key);
         }
+        static std::vector<float> mean_pooling(const std::vector<std::vector<float>>& input, const std::vector<int64_t>& attention_mask);
+
 
     private:
         std::shared_ptr<Ort::Session> session_;
@@ -50,7 +52,6 @@ class TextEmbedder {
         std::unique_ptr<TextEmbeddingTokenizer> tokenizer_;
         std::unique_ptr<RemoteEmbedder> remote_embedder_;
         std::string vocab_file_name;
-        static std::vector<float> mean_pooling(const std::vector<std::vector<float>>& input, const std::vector<int64_t>& attention_mask);
         std::string output_tensor_name;
         size_t num_dim;
         std::mutex mutex_;

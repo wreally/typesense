@@ -868,3 +868,12 @@ void event_t::to_json(nlohmann::json& obj, const std::string& coll) const {
         }
     }
 }
+
+Option<event_type_collection> AnalyticsManager::get_event_details(const std::string& event_name) {
+    const auto event_it = event_collection_map.find(event_name);
+    if(event_it == event_collection_map.end()) {
+        return Option<event_type_collection>(404, "Event name not found");
+    }
+
+    return Option<event_type_collection>(event_it->second);
+}
