@@ -1229,7 +1229,7 @@ Option<bool> get_stopword_set(const std::map<std::string, std::string>& req_para
     if(stopword_it != req_params.end()) {
         stopwords_set = stopword_it->second;
 
-        if(!StopwordsManager::get_instance().stopword_exists(stopwords_set)) {
+        if(!StopwordsManager::get_instance().stopword_set_exists(stopwords_set)) {
             return Option<bool>(404, "Could not find the stopword set named `" + stopwords_set + "`.");
         }
     }
