@@ -72,4 +72,8 @@ public:
                                                                   std::vector<ref_include_exclude_fields>& ref_include_exclude_fields_vec);
 
     [[nodiscard]] static bool merge_join_conditions(string& embedded_filter, string& query_filter);
+
+    static Option<bool> single_value_filter_query(nlohmann::json& document, const std::string& field_name,
+                                                  const std::string& ref_field_type, std::string& filter_value,
+                                                  const bool& is_reference_value = true);
 };
