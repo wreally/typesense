@@ -7523,7 +7523,7 @@ Option<size_t> Collection::remove_all_docs() {
     std::string delete_end_prefix = get_seq_id_collection_prefix() + "`";
     rocksdb::Slice upper_bound(delete_end_prefix);
 
-    rocksdb::Iterator* iter = store->scan(delete_key_prefix, &upper_bound);
+    auto iter = std::unique_ptr<rocksdb::Iterator>(store->scan(delete_key_prefix, &upper_bound));
     nlohmann::json document;
 
     auto begin = std::chrono::high_resolution_clock::now();
