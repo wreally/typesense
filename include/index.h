@@ -511,7 +511,7 @@ private:
                              bool enable_typos_for_numerical_tokens,
                              bool enable_typos_for_alpha_numerical_tokens) const;
 
-    static void aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster);
+    static void aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster, const bool& is_group_by_first_pass);
 
     Option<bool> search_all_candidates(const size_t num_search_fields,
                                        const text_match_type_t match_type,
@@ -761,7 +761,8 @@ public:
                 bool enable_lazy_filter = false,
                 bool enable_typos_for_alpha_numerical_tokens = true,
                 const size_t& max_filter_by_candidates = DEFAULT_FILTER_BY_CANDIDATES,
-                bool rerank_hybrid_matches = false, const bool& validate_field_names = true) const;
+                bool rerank_hybrid_matches = false, const bool& validate_field_names = true,
+                bool is_group_by_first_pass = false) const;
 
     void remove_field(uint32_t seq_id, nlohmann::json& document, const std::string& field_name,
                       const bool is_update);
@@ -845,7 +846,8 @@ public:
                                  const size_t concurrency,
                                  const int* sort_order,
                                  std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
-                                 const std::vector<size_t>& geopoint_indices) const;
+                                 const std::vector<size_t>& geopoint_indices,
+                                 const bool& is_group_by_first_pass) const;
 
     Option<bool> search_infix(const std::string& query, const std::string& field_name, std::vector<uint32_t>& ids,
                               size_t max_extra_prefix, size_t max_extra_suffix) const;
@@ -1119,7 +1121,8 @@ public:
 
     static void populate_result_kvs(Topster<KV>* topster, std::vector<std::vector<KV *>> &result_kvs,
                                     const spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed,
-                                    const std::vector<sort_by>& sort_by_fields);
+                                    const std::vector<sort_by>& sort_by_fields,
+                                    const bool& is_group_by_first_pass);
 };
 
 template<class T>
