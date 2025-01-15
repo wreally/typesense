@@ -2543,17 +2543,122 @@ Option<bool> Index::run_search(search_args* search_params) {
             return res;
         }
 
-        for (const auto &item: search_params->raw_result_kvs) {
-            LOG(INFO) << item.front()->key;
+        if (search_params->raw_result_kvs.empty()) {
+            return Option<bool>(true);
         }
-        LOG(INFO);
 
-        // todo: modify filter_root
+        auto collection_name = get_collection_name_with_lock();
+        auto& cm = CollectionManager::get_instance();
+        auto coll = cm.get_collection(collection_name);
+        if (coll == nullptr) {
+            return Option<bool>(400, "Could not find `" + collection_name + "` collection.");
+        }
+
+        std::vector<field> group_by_fields;
+        for (size_t i = 0; i < search_params->group_by_fields.size(); i++) {
+            const auto& field_name = search_params->group_by_fields[i];
+            auto field = search_schema.find(field_name);
+            if (field == search_schema.end()) {
+                continue;
+            }
+            group_by_fields.emplace_back(*field);
+        }
+
+        if (group_by_fields.empty()) {
+            return Option<bool>(true);
+        }
+
+        std::vector<std::set<std::string>> group_by_values(group_by_fields.size());
+        for (const auto& item: search_params->raw_result_kvs) {
+            if (item.empty()) {
+                continue;
+            }
+
+            const auto& seq_id = item.front()->key;
+            nlohmann::json doc;
+            auto get_op = coll->get_document_from_store(seq_id, doc);
+            if (!get_op.ok()) {
+                continue;
+            }
+
+            for (size_t i = 0; i < group_by_fields.size(); i++) {
+                const auto& field = group_by_fields[i];
+                const auto& field_name = field.name;
+                auto it = doc.find(field_name);
+                if (it == doc.end()) {
+                    continue;
+                }
+
+                if (field.is_singular()) {
+                    std::string value;
+                    auto single_value_filter_query_op = Join::single_value_filter_query(doc, field_name,
+                                                                                        field.type, value, false);
+                    if (!single_value_filter_query_op.ok()) {
+                        // We don't accept null value in an array of values. No need to handle 422 code.
+                        return single_value_filter_query_op;
+                    }
+                    group_by_values[i].insert(value);
+                    continue;
+                }
+
+                nlohmann::json temp_doc;
+                for (size_t j = 0; j < doc[field_name].size(); j++) {
+                    temp_doc[field_name] = doc[field_name].at(j);
+                    std::string value;
+                    auto single_value_filter_query_op = Join::single_value_filter_query(temp_doc, field_name,
+                                                                                        field.type, value, false);
+                    if (!single_value_filter_query_op.ok()) {
+                        // We don't accept null value in an array of values. No need to handle 422 code.
+                        return single_value_filter_query_op;
+                    }
+                    group_by_values[i].insert(value);
+                }
+            }
+        }
+
+        std::string filter_by;
+        for (size_t i = 0; i < group_by_fields.size() - 1; i++) {
+            const auto& field_name = group_by_fields[i].name;
+            auto& values = group_by_values[i];
+            if (values.empty()) {
+                continue;
+            }
+
+            filter_by += (field_name + ": [");
+            for (const auto& value: values) {
+                filter_by += (value + ",");
+            }
+            filter_by[filter_by.size() - 1] = ']';
+            filter_by += " || ";
+        }
+        if (!group_by_values.back().empty()) {
+            const auto& field_name = group_by_fields.back().name;
+            auto& values = group_by_values.back();
+
+            filter_by += (field_name + ": [");
+            for (const auto& value: values) {
+                filter_by += (value + ",");
+            }
+            filter_by[filter_by.size() - 1] = ']';
+        }
+
+        filter_node_t* new_filter_tree_root = nullptr;
+        Option<bool> filter_op = filter::parse_filter_query(filter_by, search_schema, store, "", new_filter_tree_root,
+                                                            search_params->validate_field_names);
+        if (!filter_op.ok()) {
+            delete new_filter_tree_root;
+            return filter_op;
+        }
+
+        if (filter_root == nullptr) {
+            filter_root.reset(new_filter_tree_root);
+        } else {
+            auto root = new filter_node_t(AND, filter_root.release(), new_filter_tree_root);
+            filter_root.reset(root);
+        }
 
         delete search_params->topster;
-        search_params->topster = nullptr;
         delete search_params->curated_topster;
-        search_params->curated_topster = nullptr;
 
         search_params->raw_result_kvs.clear();
         search_params->groups_processed.clear();

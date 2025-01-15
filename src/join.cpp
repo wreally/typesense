@@ -5,8 +5,9 @@
 #include "logger.h"
 #include <timsort.hpp>
 
-Option<bool> single_value_filter_query(nlohmann::json& document, const std::string& field_name,
-                                       const std::string& ref_field_type, std::string& filter_value) {
+Option<bool> Join::single_value_filter_query(nlohmann::json& document, const std::string& field_name,
+                                             const std::string& ref_field_type, std::string& filter_value,
+                                             const bool& is_reference_value) {
     auto const& json_value = document[field_name];
 
     if (json_value.is_null()) {
@@ -50,8 +51,13 @@ Option<bool> single_value_filter_query(nlohmann::json& document, const std::stri
                                                   (ref_field_type == field_types::INT32 &&
                                                    StringUtils::is_int32_t(std::to_string(json_value.get<int64_t>()))))) {
         filter_value += std::to_string(json_value.get<int64_t>());
-    } else {
+    } else if (is_reference_value) {
         return Option<bool>(400, "Field `" + field_name + "` must have `" + ref_field_type + "` value.");
+    } else if (json_value.is_number_float() && ref_field_type == field_types::FLOAT) {
+        filter_value += std::to_string(json_value.get<float>());
+    } else {
+        return Option<bool>(400, "Expected field `" + field_name + "` to have any of {`int32`, `int64`, `float`, `string`} "
+                                   "types. Which is `" + ref_field_type + "` instead.");
     }
 
     return Option<bool>(true);
