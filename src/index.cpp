@@ -1705,8 +1705,8 @@ void Index::do_facets(std::vector<facet> & facets, facet_query_t & facet_query,
     }
 }
 
-void Index::aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster) {
-    if(index_topster->distinct) {
+void Index::aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster, const bool& is_group_by_first_pass) {
+    if(index_topster->distinct && !is_group_by_first_pass) {
         for(auto &group_topster_entry: index_topster->group_kv_map) {
             auto group_topster = group_topster_entry.second;
             for(const auto& map_kv: group_topster->map) {
@@ -2486,11 +2486,84 @@ Option<filter_result_t> Index::do_filtering_with_reference_ids(const std::string
 }
 
 Option<bool> Index::run_search(search_args* search_params) {
+    auto& filter_root = search_params->filter_tree_root_guard;
+    if (search_params->group_limit) {
+        auto res = search(search_params->field_query_tokens,
+                          search_params->search_fields,
+                          search_params->match_type,
+                          filter_root, search_params->facets, search_params->facet_query,
+                          search_params->max_facet_values,
+                          search_params->included_ids, search_params->excluded_ids,
+                          search_params->sort_fields_std, search_params->num_typos,
+                          search_params->topster, search_params->curated_topster,
+                          search_params->fetch_size,
+                          search_params->per_page, search_params->offset, search_params->token_order,
+                          search_params->prefixes, search_params->drop_tokens_threshold,
+                          search_params->all_result_ids_len, search_params->groups_processed,
+                          search_params->searched_queries,
+                          search_params->qtoken_set,
+                          search_params->raw_result_kvs, search_params->override_result_kvs,
+                          search_params->typo_tokens_threshold,
+                          search_params->group_limit,
+                          search_params->group_by_fields,
+                          search_params->group_missing_values,
+                          search_params->default_sorting_field,
+                          search_params->prioritize_exact_match,
+                          search_params->prioritize_token_position,
+                          search_params->prioritize_num_matching_fields,
+                          search_params->exhaustive_search,
+                          search_params->concurrency,
+                          search_params->search_cutoff_ms,
+                          search_params->min_len_1typo,
+                          search_params->min_len_2typo,
+                          search_params->max_candidates,
+                          search_params->infixes,
+                          search_params->max_extra_prefix,
+                          search_params->max_extra_suffix,
+                          search_params->facet_query_num_typos,
+                          search_params->filter_curated_hits,
+                          search_params->split_join_tokens,
+                          search_params->vector_query,
+                          search_params->facet_sample_percent,
+                          search_params->facet_sample_threshold,
+                          search_params->drop_tokens_mode,
+                          search_params->facet_index_types,
+                          search_params->enable_typos_for_numerical_tokens,
+                          search_params->enable_synonyms,
+                          search_params->synonym_prefix,
+                          search_params->synonym_num_typos,
+                          search_params->enable_lazy_filter,
+                          search_params->enable_typos_for_alpha_numerical_tokens,
+                          search_params->max_filter_by_candidates,
+                          search_params->rerank_hybrid_matches,
+                          search_params->validate_field_names,
+                          true
+        );
+        if (!res.ok()) {
+            return res;
+        }
+
+        for (const auto &item: search_params->raw_result_kvs) {
+            LOG(INFO) << item.front()->key;
+        }
+        LOG(INFO);
+
+        // todo: modify filter_root
+
+        delete search_params->topster;
+        search_params->topster = nullptr;
+        delete search_params->curated_topster;
+        search_params->curated_topster = nullptr;
+
+        search_params->raw_result_kvs.clear();
+        search_params->groups_processed.clear();
+        search_params->override_result_kvs.clear();
+    }
 
     auto res = search(search_params->field_query_tokens,
                   search_params->search_fields,
                   search_params->match_type,
-                  search_params->filter_tree_root_guard, search_params->facets, search_params->facet_query,
+                  filter_root, search_params->facets, search_params->facet_query,
                   search_params->max_facet_values,
                   search_params->included_ids, search_params->excluded_ids,
                   search_params->sort_fields_std, search_params->num_typos,
@@ -2535,7 +2608,8 @@ Option<bool> Index::run_search(search_args* search_params) {
                   search_params->enable_typos_for_alpha_numerical_tokens,
                   search_params->max_filter_by_candidates,
                   search_params->rerank_hybrid_matches,
-                  search_params->validate_field_names
+                  search_params->validate_field_names,
+                  false
     );
 
     return res;
@@ -3148,7 +3222,7 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
                    uint32_t synonym_num_typos,
                    bool enable_lazy_filter,
                    bool enable_typos_for_alpha_numerical_tokens, const size_t& max_filter_by_candidates,
-                   bool rerank_hybrid_matches, const bool& validate_field_names) const {
+                   bool rerank_hybrid_matches, const bool& validate_field_names, bool is_group_by_first_pass) const {
     std::shared_lock lock(mutex);
 
     if(field_query_tokens.empty()) {
@@ -3191,8 +3265,8 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
         topster_size = std::min<size_t>(topster_size, num_seq_ids());
     }
     topster_size = std::max((size_t)1, topster_size);  // needs to be atleast 1 since scoring is mandatory
-    topster = new Topster<KV>(topster_size, group_limit);
-    curated_topster = new Topster<KV>(topster_size, group_limit);
+    topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass);
+    curated_topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass);
 
     std::set<uint32_t> curated_ids;
     std::map<size_t, std::map<size_t, uint32_t>> included_ids_map;  // outer pos => inner pos => list of IDs
@@ -3431,7 +3505,7 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
                                                       excluded_result_ids, excluded_result_ids_size,
                                                       all_result_ids, all_result_ids_len,
                                                       filter_result_iterator, concurrency,
-                                                      sort_order, field_values, geopoint_indices);
+                                                      sort_order, field_values, geopoint_indices, is_group_by_first_pass);
             if (!search_wildcard_op.ok()) {
                 return search_wildcard_op;
             }
@@ -3908,8 +3982,8 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
     topster->sort();
     curated_topster->sort();
 
-    populate_result_kvs(topster, raw_result_kvs, groups_processed, sort_fields_std);
-    populate_result_kvs(curated_topster, override_result_kvs, groups_processed, sort_fields_std);
+    populate_result_kvs(topster, raw_result_kvs, groups_processed, sort_fields_std, is_group_by_first_pass);
+    populate_result_kvs(curated_topster, override_result_kvs, groups_processed, sort_fields_std, is_group_by_first_pass);
     std::vector<uint32_t> top_k_result_ids, top_k_curated_result_ids;
     std::vector<facet> top_k_facets;
 
@@ -6004,7 +6078,8 @@ Option<bool> Index::search_wildcard(filter_node_t const* const& filter_tree_root
                                     const size_t concurrency,
                                     const int* sort_order,
                                     std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
-                                    const std::vector<size_t>& geopoint_indices) const {
+                                    const std::vector<size_t>& geopoint_indices,
+                                    const bool& is_group_by_first_pass) const {
 
     filter_result_iterator->compute_iterators();
     auto const& approx_filter_ids_length = filter_result_iterator->approx_filter_ids_length;
@@ -6050,7 +6125,7 @@ Option<bool> Index::search_wildcard(filter_node_t const* const& filter_tree_root
 
         searched_queries.push_back({});
 
-        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct);
+        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct, is_group_by_first_pass);
         auto& compute_sort_score_status = compute_sort_score_statuses[thread_id] = nullptr;
 
         thread_pool->enqueue([this, &parent_search_begin, &parent_search_stop_ms, &parent_search_cutoff,
@@ -6153,7 +6228,7 @@ Option<bool> Index::search_wildcard(filter_node_t const* const& filter_tree_root
         for(const auto& it : tgroups_processed[thread_id]) {
             groups_processed[it.first]+= it.second;
         }
-        aggregate_topster(topster, topsters[thread_id]);
+        aggregate_topster(topster, topsters[thread_id], is_group_by_first_pass);
         delete topsters[thread_id];
     }
 
@@ -7968,8 +8043,9 @@ float Index::compute_decay_function_score(const sort_by& sort_field, uint32_t se
 
 void Index::populate_result_kvs(Topster<KV>* topster, std::vector<std::vector<KV *>> &result_kvs,
                                 const spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed,
-                                const std::vector<sort_by>& sort_by_fields) {
-    if(topster->distinct) {
+                                const std::vector<sort_by>& sort_by_fields,
+                                const bool& is_group_by_first_pass) {
+    if(topster->distinct && !is_group_by_first_pass) {
         // we have to pick top-K groups
         Topster<KV> gtopster(topster->MAX_SIZE);
 
