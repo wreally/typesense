@@ -3600,7 +3600,7 @@ Option<bool> Collection::do_union(const std::vector<uint32_t>& collection_ids,
     }
 
     auto union_topster = std::make_unique<Topster<Union_KV, std::pair<uint32_t, uint64_t>, pair_hash, Union_KV::get_key,
-                                                        Union_KV::is_greater, Union_KV::is_smaller>>(
+                                                        Union_KV::get_distinct_key, Union_KV::is_greater, Union_KV::is_smaller>>(
                                                             std::max<size_t>(union_params.fetch_size, Index::DEFAULT_TOPSTER_SIZE));
 
     for (size_t search_index = 0; search_index < searches.size(); search_index++) {
@@ -7523,7 +7523,7 @@ Option<size_t> Collection::remove_all_docs() {
     std::string delete_end_prefix = get_seq_id_collection_prefix() + "`";
     rocksdb::Slice upper_bound(delete_end_prefix);
 
-    rocksdb::Iterator* iter = store->scan(delete_key_prefix, &upper_bound);
+    auto iter = std::unique_ptr<rocksdb::Iterator>(store->scan(delete_key_prefix, &upper_bound));
     nlohmann::json document;
 
     auto begin = std::chrono::high_resolution_clock::now();
