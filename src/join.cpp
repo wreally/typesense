@@ -57,7 +57,7 @@ Option<bool> Join::single_value_filter_query(nlohmann::json& document, const std
         filter_value += std::to_string(json_value.get<float>());
     } else {
         return Option<bool>(400, "Expected field `" + field_name + "` to have any of {`int32`, `int64`, `float`, `string`} "
-                                   "types. Which is `" + ref_field_type + "` instead.");
+                                   "types.");
     }
 
     return Option<bool>(true);
