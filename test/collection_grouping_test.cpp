@@ -921,19 +921,18 @@ TEST_F(CollectionGroupingTest, SortingMoreThanMaxTopsterSize) {
 
     //first search in desc order
     std::vector<sort_by> sort_fields = {sort_by("_group_found", "DESC")};
-    
+
     auto res = coll3->search("*", {}, "", {"brand"}, sort_fields, {0}, 100, 2, FREQUENCY,
                                    {false}, Index::DROP_TOKENS_THRESHOLD,
                                    spp::sparse_hash_set<std::string>(),
-                                   spp::sparse_hash_set<std::string>(), 10, "", 30, 5,
+                                   spp::sparse_hash_set<std::string>({"*"}), 10, "", 30, 5,
                                    "", 10,
                                    {}, {}, {"size"}, 2).get();
 
     ASSERT_EQ(1000, res["found_docs"].get<size_t>());
-    ASSERT_EQ(300, res["found"].get<size_t>());
+    // Actual found value is 300, but we are only approximating it using hyperloglog_hip algorithm.
+    ASSERT_EQ(308, res["found"].get<size_t>());
     ASSERT_EQ(100, res["grouped_hits"].size());
-
-    ASSERT_EQ(4, res["grouped_hits"][4]["found"].get<int32_t>());
 
     ASSERT_EQ(4, res["grouped_hits"][4]["found"].get<int32_t>());
 

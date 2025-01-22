@@ -2693,17 +2693,10 @@ Option<nlohmann::json> Collection::search(collection_search_args_t& coll_args) c
     const auto& max_facet_values = coll_args.max_facet_values;
     const auto& facet_return_parent = coll_args.facet_return_parent;
     const auto& voice_query = coll_args.voice_query;
+    const auto& total = search_params->found_count;
 
     auto& raw_result_kvs = search_params->raw_result_kvs;
     auto& override_result_kvs = search_params->override_result_kvs;
-
-    size_t total = 0;
-    // for grouping we have to aggregate group set sizes to a count value
-    if(group_limit) {
-        total = search_params->groups_processed.size() + override_result_kvs.size();
-    } else {
-        total = search_params->all_result_ids_len;
-    }
 
     if(search_cutoff && total == 0) {
         // this can happen if other requests stopped this request from being processed
@@ -2845,7 +2838,7 @@ Option<nlohmann::json> Collection::search(collection_search_args_t& coll_args) c
     nlohmann::json result = nlohmann::json::object();
     result["found"] = total;
     if(group_limit != 0) {
-        result["found_docs"] = search_params->all_result_ids_len;
+        result["found_docs"] = search_params->found_docs;
     }
 
     if(exclude_fields.count("out_of") == 0) {

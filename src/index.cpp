@@ -2679,6 +2679,11 @@ Option<bool> Index::run_search(search_args* search_params) {
             filter_root.reset(root);
         }
 
+        // for grouping we have to aggregate group set sizes to a count value
+        search_params->found_count = search_params->topster->hyperloglog_counter.count() +
+                                        search_params->override_result_kvs.size();
+        search_params->found_docs = search_params->all_result_ids_len;
+
         delete search_params->topster;
         delete search_params->curated_topster;
 
@@ -2740,6 +2745,10 @@ Option<bool> Index::run_search(search_args* search_params) {
                   false,
                   group_by_missing_value_ids
     );
+
+    if (!search_params->group_limit) {
+        search_params->found_count = search_params->all_result_ids_len;
+    }
 
     return res;
 }

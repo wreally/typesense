@@ -197,6 +197,8 @@ struct search_args {
     bool enable_typos_for_alpha_numerical_tokens;
     bool rerank_hybrid_matches;
     bool validate_field_names;
+    size_t found_count = 0;
+    size_t found_docs = 0;
 
     search_args(std::vector<query_tokens_t> field_query_tokens, std::vector<search_field_t> search_fields,
                 const text_match_type_t match_type, std::vector<facet>& facets,
