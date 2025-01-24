@@ -293,7 +293,7 @@ struct StringUtils {
     }
 
     // reference: https://stackoverflow.com/a/27952689/131050
-    static uint64_t hash_combine(uint64_t combined, uint64_t hash) {
+    static constexpr uint64_t hash_combine(uint64_t combined, uint64_t hash) {
         combined ^= hash + 0x517cc1b727220a95 + (combined << 6) + (combined >> 2);
         return combined;
     }

@@ -8,21 +8,19 @@
 #include "dense_array.h"
 
 namespace hyperloglog_hip {
-    template<typename Key, typename Hash = std::hash<Key>, int NumRegisterBits = 5>
+    template<int NumRegisterBits = 5>
     class distinct_counter {
     public:
-        typedef Key key_type;
-        typedef Hash hash_type;
 
         distinct_counter(size_t num_bucket_bits = 12)
                 : num_bucket_bits_(num_bucket_bits), M_(1 << num_bucket_bits),
                   c_(0), s_(1 << num_bucket_bits) {}
 
-        void insert(const key_type &v) {
+        void insert(const uint64_t &hash) {
             static constexpr uint64_t num_register_bits = NumRegisterBits;
             static constexpr uint64_t register_limit = (uint64_t(1) << num_register_bits) - 1;
 
-            const uint64_t h = hash_(v) * magic1() + magic2();
+            const uint64_t h = hash * magic1() + magic2();
             const uint64_t h0 = h & ((uint64_t(1) << num_bucket_bits_) - 1);
             const uint64_t h1 = h >> num_bucket_bits_;
 
@@ -48,7 +46,6 @@ namespace hyperloglog_hip {
         const size_t num_bucket_bits_;
         dense_array<NumRegisterBits> M_;
         double c_, s_;
-        hash_type hash_;
 
         static constexpr uint64_t magic1() {
             return 9223372036854775837ULL;

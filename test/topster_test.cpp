@@ -179,7 +179,7 @@ TEST(TopsterTest, MaxFloatValues) {
 }
 
 TEST(TopsterTest, DistinctIntValues) {
-    Topster<KV> dist_topster(5, 2, false);
+    Topster<KV> dist_topster(5, 2, false, false);
 
     struct {
         uint16_t query_index;
@@ -236,7 +236,7 @@ TEST(TopsterTest, DistinctIntValues) {
         }
     }
 
-    Topster<KV> dist_topster_first_pass(7, 2, true);
+    Topster<KV> dist_topster_first_pass(7, 2, true, true);
 
     for(int i = 0; i < 14; i++) {
         int64_t scores[3];
@@ -259,4 +259,5 @@ TEST(TopsterTest, DistinctIntValues) {
     }
 
     ASSERT_TRUE(dist_topster_first_pass.group_kv_map.empty());
+    ASSERT_EQ(10, dist_topster_first_pass.hyperloglog_counter.count());
 }

@@ -2680,8 +2680,7 @@ Option<bool> Index::run_search(search_args* search_params) {
         }
 
         // for grouping we have to aggregate group set sizes to a count value
-        search_params->found_count = search_params->topster->hyperloglog_counter.count() +
-                                        search_params->override_result_kvs.size();
+        search_params->found_count = search_params->topster->hyperloglog_counter.count();
         search_params->found_docs = search_params->all_result_ids_len;
 
         delete search_params->topster;
@@ -2746,7 +2745,12 @@ Option<bool> Index::run_search(search_args* search_params) {
                   group_by_missing_value_ids
     );
 
-    if (!search_params->group_limit) {
+    if (search_params->group_limit) {
+        // Since hyperloglog_counter returns an approximate count of the number of distinct group_by values, sometimes,
+        // the count can be less than the size of `raw_result_kvs`.
+        search_params->found_count = std::max(search_params->found_count, search_params->raw_result_kvs.size()) +
+                                        search_params->override_result_kvs.size();
+    } else {
         search_params->found_count = search_params->all_result_ids_len;
     }
 
@@ -3410,8 +3414,8 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
         topster_size = std::min<size_t>(topster_size, num_seq_ids());
     }
     topster_size = std::max((size_t)1, topster_size);  // needs to be atleast 1 since scoring is mandatory
-    topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass);
-    curated_topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass);
+    topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass, true);
+    curated_topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass, false);
 
     std::set<uint32_t> curated_ids;
     std::map<size_t, std::map<size_t, uint32_t>> included_ids_map;  // outer pos => inner pos => list of IDs
@@ -6305,7 +6309,7 @@ Option<bool> Index::search_wildcard(filter_node_t const* const& filter_tree_root
 
         searched_queries.push_back({});
 
-        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct, is_group_by_first_pass);
+        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct, is_group_by_first_pass, false);
         auto& compute_sort_score_status = compute_sort_score_statuses[thread_id] = nullptr;
 
         thread_pool->enqueue([this, &parent_search_begin, &parent_search_stop_ms, &parent_search_cutoff,

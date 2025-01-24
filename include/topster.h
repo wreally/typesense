@@ -181,12 +181,12 @@ struct Union_KV : public KV {
                     std::tie(j->scores[0], j->scores[1], j->scores[2], j->search_index, j->key);
     }
 
-    static constexpr std::pair<uint32_t, uint64_t> get_key(const Union_KV* union_kv) {
-        return std::make_pair(union_kv->search_index, union_kv->key);
+    static constexpr uint64_t get_key(const Union_KV* union_kv) {
+        return StringUtils::hash_combine(union_kv->search_index, union_kv->key);
     }
 
-    static constexpr std::pair<uint32_t, uint64_t> get_distinct_key(const Union_KV* union_kv) {
-        return std::make_pair(union_kv->search_index, union_kv->distinct_key);
+    static constexpr uint64_t get_distinct_key(const Union_KV* union_kv) {
+        return StringUtils::hash_combine(union_kv->search_index, union_kv->distinct_key);
     }
 };
 
@@ -200,9 +200,8 @@ struct pair_hash {
 /*
 * Remembers the max-K elements seen so far using a min-heap
 */
-template <typename T, typename K = uint64_t, typename H = std::hash<uint64_t>, const auto& get_key = KV::get_key,
-            const auto& get_distinct_key = KV::get_distinct_key, const auto& is_greater = KV::is_greater,
-            const auto& is_smaller = KV::is_smaller>
+template <typename T, const auto& get_key = KV::get_key, const auto& get_distinct_key = KV::get_distinct_key,
+            const auto& is_greater = KV::is_greater, const auto& is_smaller = KV::is_smaller>
 struct Topster {
     const uint32_t MAX_SIZE;
     uint32_t size;
@@ -210,20 +209,23 @@ struct Topster {
     T *data;
     T** kvs;
 
-    std::unordered_map<K, T*, H> map;
+    std::unordered_map<uint64_t, T*> map;
 
     bool is_group_by_first_pass;
     size_t distinct;
     spp::sparse_hash_set<uint64_t> group_doc_seq_ids;
-    spp::sparse_hash_map<uint64_t, Topster<T, K, H, get_key, get_distinct_key, is_greater, is_smaller>*> group_kv_map;
-    hyperloglog_hip::distinct_counter<K, H, 8> hyperloglog_counter;
+    spp::sparse_hash_map<uint64_t, Topster<T, get_key, get_distinct_key, is_greater, is_smaller>*> group_kv_map;
 
-    explicit Topster(size_t capacity): Topster(capacity, 0, false) {
+    bool should_count_distinct;
+    hyperloglog_hip::distinct_counter<5> hyperloglog_counter = hyperloglog_hip::distinct_counter<5>(12);
+
+    explicit Topster(size_t capacity): Topster(capacity, 0, false, false) {
     }
 
-    explicit Topster(size_t capacity, size_t distinct, bool is_group_by_first_pass) :
+    explicit Topster(size_t capacity, size_t distinct, bool is_group_by_first_pass, bool should_count_distinct) :
                                                                 MAX_SIZE(capacity), size(0), distinct(distinct),
-                                                                is_group_by_first_pass(is_group_by_first_pass) {
+                                                                is_group_by_first_pass(is_group_by_first_pass),
+                                                                should_count_distinct(should_count_distinct) {
         // we allocate data first to get a memory block whose indices are then assigned to `kvs`
         // we use separate **kvs for easier pointer swaps
         data = new T[capacity];
@@ -275,7 +277,7 @@ struct Topster {
         const bool& is_group_by_second_pass = distinct && !is_group_by_first_pass;
 
         if(!is_group_by_second_pass && less_than_min_heap) {
-            if (is_group_by_first_pass) {
+            if (is_group_by_first_pass && should_count_distinct) {
                 hyperloglog_counter.insert(get_distinct_key(kv));
             }
             // for non-distinct or first group_by pass, if incoming value is smaller than min-heap ignore
@@ -298,7 +300,8 @@ struct Topster {
             if(kvs_it != group_kv_map.end()) {
                 kvs_it->second->add(kv);
             } else {
-                auto g_topster = new Topster<T, K, H, get_key, get_distinct_key, is_greater, is_smaller>(distinct, 0, false);
+                auto g_topster = new Topster<T, get_key, get_distinct_key, is_greater, is_smaller>(distinct, 0, false,
+                                                                                                   false);
                 g_topster->add(kv);
                 group_kv_map.insert({kv->distinct_key, g_topster});
             }
@@ -309,10 +312,6 @@ struct Topster {
             //LOG(INFO) << "Searching for key: " << kv->key;
 
             const auto& key = is_group_by_first_pass ? get_distinct_key(kv) : get_key(kv);
-            if (is_group_by_first_pass) {
-                hyperloglog_counter.insert(key);
-            }
-
             const auto& found_it = map.find(key);
             bool is_duplicate_key = (found_it != map.end());
 
@@ -339,6 +338,9 @@ struct Topster {
                 heap_op_index = existing_kv->array_index;
                 map.erase(is_group_by_first_pass ? get_distinct_key(kvs[heap_op_index]) : get_key(kvs[heap_op_index]));
             } else {  // not duplicate
+                if (is_group_by_first_pass && should_count_distinct) {
+                    hyperloglog_counter.insert(key);
+                }
 
                 if(size < MAX_SIZE) {
                     // we just copy to end of array
