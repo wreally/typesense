@@ -2538,8 +2538,7 @@ bool get_stopword(const std::shared_ptr<http_req>& req, const std::shared_ptr<ht
     const std::string & stopword_name = req->params["name"];
     StopwordsManager& stopwordManager = StopwordsManager::get_instance();
 
-    stopword_struct_t stopwordStruct;
-    Option<bool> stopword_op = stopwordManager.get_stopword(stopword_name, stopwordStruct);
+    const Option<stopword_struct_t>& stopword_op = stopwordManager.get_stopword(stopword_name);
 
     if(!stopword_op.ok()) {
         res->set(stopword_op.code(), stopword_op.error());
@@ -2548,7 +2547,7 @@ bool get_stopword(const std::shared_ptr<http_req>& req, const std::shared_ptr<ht
 
     nlohmann::json res_json;
 
-    res_json["stopwords"] = stopwordStruct.to_json();
+    res_json["stopwords"] = stopword_op.get().to_json();
 
     res->set_200(res_json.dump());
     return true;

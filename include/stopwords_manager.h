@@ -10,6 +10,7 @@
 struct stopword_struct_t {
     std::string id;
     spp::sparse_hash_set<std::string> stopwords;
+    spp::sparse_hash_set<std::string> stopwords_phrases;
     std::string locale;
 
     nlohmann::json to_json() const {
@@ -21,6 +22,10 @@ struct stopword_struct_t {
         }
 
         for(const auto& stopword : stopwords) {
+            doc["stopwords"].push_back(stopword);
+        }
+
+        for(const auto& stopword : stopwords_phrases) {
             doc["stopwords"].push_back(stopword);
         }
 
@@ -53,9 +58,9 @@ public:
 
     void init(Store* store);
 
-    spp::sparse_hash_map<std::string, stopword_struct_t> get_stopwords() const;
+    const spp::sparse_hash_map<std::string, stopword_struct_t>& get_stopwords() const;
 
-    Option<bool> get_stopword(const std::string&, stopword_struct_t&) const;
+    Option<stopword_struct_t> get_stopword(const std::string&) const;
 
     Option<bool> upsert_stopword(const std::string&, const nlohmann::json&, bool write_to_store=false);
 
@@ -63,5 +68,9 @@ public:
 
     void dispose();
 
-    bool stopword_exists(const std::string&);
+    bool stopword_set_exists(const std::string &stopword);
+
+    bool is_stopword(const std::string& stopword_set, const std::string& token);
+
+    void process_stopwords(const std::string& stopword_set, std::vector<std::string>& tokens);
 };

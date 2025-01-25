@@ -4269,13 +4269,6 @@ void Collection::parse_search_query(const std::string &query, std::vector<std::s
         std::vector<std::string> tokens;
         std::vector<std::string> tokens_non_stemmed;
         stopword_struct_t stopwordStruct;
-        if(!stopwords_set.empty()) {
-            const auto &stopword_op = StopwordsManager::get_instance().get_stopword(stopwords_set, stopwordStruct);
-            if (!stopword_op.ok()) {
-                LOG(ERROR) << stopword_op.error();
-                LOG(ERROR) << "Error fetching stopword_list for stopword " << stopwords_set;
-            }
-        }
 
         if(already_segmented) {
             StringUtils::split(query, tokens, " ");
@@ -4290,9 +4283,15 @@ void Collection::parse_search_query(const std::string &query, std::vector<std::s
             }
         }
 
-        for (const auto val: stopwordStruct.stopwords) {
-            tokens.erase(std::remove(tokens.begin(), tokens.end(), val), tokens.end());
-            tokens_non_stemmed.erase(std::remove(tokens_non_stemmed.begin(), tokens_non_stemmed.end(), val), tokens_non_stemmed.end());
+        if(!stopwords_set.empty()) {
+            auto stopword_op = StopwordsManager::get_instance().get_stopword(stopwords_set);
+            if (!stopword_op.ok()) {
+                LOG(ERROR) << stopword_op.error();
+                LOG(ERROR) << "Error fetching stopword_list for stopword " << stopwords_set;
+            }
+            stopwordStruct = stopword_op.get();
+            //process stopwords
+            StopwordsManager::get_instance().process_stopwords(stopwords_set, tokens);
         }
 
         bool exclude_operator_prior = false;

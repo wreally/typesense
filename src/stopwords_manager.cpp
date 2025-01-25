@@ -5,21 +5,20 @@ void StopwordsManager::init(Store* _store) {
     store = _store;
 }
 
-spp::sparse_hash_map<std::string, stopword_struct_t> StopwordsManager::get_stopwords() const {
+const spp::sparse_hash_map<std::string, stopword_struct_t>& StopwordsManager::get_stopwords() const {
     std::shared_lock lock(mutex);
     return stopword_configs;
 }
 
-Option<bool> StopwordsManager::get_stopword(const std::string& stopword_name, stopword_struct_t& stopwords_struct) const {
+Option<stopword_struct_t> StopwordsManager::get_stopword(const std::string& stopword_name) const {
     std::shared_lock lock(mutex);
 
     const auto& it = stopword_configs.find(stopword_name);
     if(it != stopword_configs.end()) {
-        stopwords_struct = it->second;
-        return Option<bool>(true);
+        return Option<stopword_struct_t>(it->second);
     }
 
-    return Option<bool>(404, "Stopword `" + stopword_name +"` not found.");
+    return Option<stopword_struct_t>(404, "Stopword `" + stopword_name +"` not found.");
 }
 
 Option<bool> StopwordsManager::upsert_stopword(const std::string& stopword_name, const nlohmann::json& stopwords_json,
@@ -58,18 +57,33 @@ Option<bool> StopwordsManager::upsert_stopword(const std::string& stopword_name,
 
     std::vector<std::string> tokens;
     spp::sparse_hash_set<std::string> stopwords_set;
+    spp::sparse_hash_set<std::string> stopwords_phrases;
     const auto& stopwords = stopwords_json[STOPWORD_VALUES];
+    std::vector<char> custom_symbols;
 
     for (const auto &stopword: stopwords.items()) {
         const auto& val = stopword.value().get<std::string>();
-        Tokenizer(val, true, false, locale, {}, {}).tokenize(tokens);
 
-        for(const auto& tok : tokens) {
-            stopwords_set.emplace(tok);
+        //if first and last char is double quote, should add ' ' as custom symbol to tokenize whole string
+        if (val[0] == '\"' && val[val.size() - 1] == '\"') {
+            custom_symbols.push_back(' ');
+        }
+
+        Tokenizer(val, true, false, locale, custom_symbols, {}).tokenize(tokens);
+
+        if(custom_symbols.empty()) { //store indvidual stopwords and stopword phrases separately
+            for (const auto &tok: tokens) {
+                stopwords_set.emplace(tok);
+            }
+        } else {
+            for (const auto &tok: tokens) {
+                stopwords_phrases.emplace(tok);
+            }
         }
         tokens.clear();
+        custom_symbols.clear();
     }
-    stopword_configs[stopword_name] = stopword_struct_t{stopword_name, stopwords_set, locale};
+    stopword_configs[stopword_name] = stopword_struct_t{stopword_name, stopwords_set, stopwords_phrases, locale};
     return Option<bool>(true);
 }
 
@@ -99,8 +113,56 @@ void StopwordsManager::dispose() {
     stopword_configs.clear();
 }
 
-bool StopwordsManager::stopword_exists(const std::string &stopword) {
+bool StopwordsManager::stopword_set_exists(const std::string &stopword) {
     std::shared_lock lock(mutex);
 
     return stopword_configs.find(stopword) != stopword_configs.end();
+}
+
+bool StopwordsManager::is_stopword(const std::string &stopword_set, const std::string &token) {
+    if(stopword_set_exists(stopword_set)) {
+        const auto& stopwords = stopword_configs.at(stopword_set).stopwords;
+        const auto& stopword_phrases = stopword_configs.at(stopword_set).stopwords_phrases;
+
+        if(stopwords.find(token) != stopwords.end() || stopword_phrases.find(token) != stopword_phrases.end()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void StopwordsManager::process_stopwords(const std::string& stopword_set, std::vector<std::string>& tokens) {
+    std::string merged_str;
+    std::vector<int> stopword_indices;
+
+    for (int i = tokens.size(); i >= 1; --i) {
+        // Loop through all subsequences of length i
+        for (int j = 0; j <= tokens.size() - i; ++j) {
+            merged_str.clear();
+            // Create a string from the subsequence of length i starting at index j
+            for (int k = j; k < j + i; ++k) {
+                if (k != j) {
+                    merged_str += " ";  // Add space between words
+                }
+                merged_str += tokens[k];
+            }
+
+            if(is_stopword(stopword_set, merged_str)) {
+                // store the indices of tokens which are stopword or stopword phrases
+                for (int k = j; k < j + i; ++k) {
+                    stopword_indices.push_back(k);
+                }
+            }
+        }
+    }
+
+    // remove stopword/stopword phrases
+    for(const auto& ind : stopword_indices) {
+        tokens[ind].clear();
+    }
+
+    tokens.erase(std::remove_if(tokens.begin(), tokens.end(), [&](const auto& str) {
+        return str.empty();
+    }));
 }
