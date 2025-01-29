@@ -950,7 +950,8 @@ TEST_F(CollectionGroupingTest, SortingMoreThanMaxTopsterSize) {
                                    {}, {}, {"size"}, 2).get();
 
     ASSERT_EQ(1000, res["found_docs"].get<size_t>());
-    ASSERT_EQ(300, res["found"].get<size_t>());
+    // Actual found value is 300, but we are only approximating it using hyperloglog_hip algorithm.
+    ASSERT_EQ(308, res["found"].get<size_t>());
     ASSERT_EQ(100, res["grouped_hits"].size());
 
     ASSERT_EQ(3, res["grouped_hits"][4]["found"].get<int32_t>());
@@ -974,7 +975,8 @@ TEST_F(CollectionGroupingTest, SortingMoreThanMaxTopsterSize) {
                                    {}, {}, {"size"}, 2).get();
 
     ASSERT_EQ(1000, res2["found_docs"].get<size_t>());
-    ASSERT_EQ(300, res2["found"].get<size_t>());
+    // Actual found value is 300, but we are only approximating it using hyperloglog_hip algorithm.
+    ASSERT_EQ(308, res2["found"].get<size_t>());
     ASSERT_EQ(100, res2["grouped_hits"].size());
 
     ASSERT_EQ(2, res2["grouped_hits"][0]["found"].get<int32_t>());
@@ -993,7 +995,8 @@ TEST_F(CollectionGroupingTest, SortingMoreThanMaxTopsterSize) {
                                    {}, {}, {"size"}, 2).get();
 
     ASSERT_EQ(1000, res2["found_docs"].get<size_t>());
-    ASSERT_EQ(300, res2["found"].get<size_t>());
+    // Actual found value is 300, but we are only approximating it using hyperloglog_hip algorithm.
+    ASSERT_EQ(308, res2["found"].get<size_t>());
     ASSERT_EQ(100, res2["grouped_hits"].size());
 
     ASSERT_EQ(3, res2["grouped_hits"][0]["found"].get<int32_t>());

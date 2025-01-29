@@ -2533,7 +2533,6 @@ Option<bool> Collection::init_index_search_args(collection_search_args_t& coll_a
     return Option<bool>(true);
 }
 
-// todo: recheck search_args initialization.
 Option<nlohmann::json> Collection::search(std::string query, const std::vector<std::string> & search_fields,
                                           const std::string & filter_query, const std::vector<std::string> & facet_fields,
                                           const std::vector<sort_by> & sort_fields, const std::vector<uint32_t>& num_typos,

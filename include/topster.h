@@ -6,8 +6,15 @@
 #include <algorithm>
 #include <unordered_map>
 #include <field.h>
+#include <count_min_sketch.h>
 #include "filter_result_iterator.h"
 #include "hll/distinct_counter.h"
+
+struct group_found_params_t {
+    int8_t sort_index = -1;
+    int8_t sort_order = 1;
+    uint64_t group_count{};
+};
 
 struct KV {
     int8_t match_score_index{};
@@ -119,6 +126,22 @@ struct KV {
         query_indices = nullptr;
     }
 
+    static int64_t get_group_found_value(KV* kv, const group_found_params_t& group_found_params) {
+        if (group_found_params.sort_index == -1) {
+            return 0;
+        }
+
+        return group_found_params.sort_order * kv->scores[group_found_params.sort_index];
+    }
+
+    static void set_group_found_value(KV* kv, const group_found_params_t& group_found_params) {
+        if (group_found_params.sort_index == -1) {
+            return;
+        }
+
+        kv->scores[group_found_params.sort_index] = group_found_params.sort_order * group_found_params.group_count;
+    }
+
     static bool is_greater(const KV* i, const KV* j) {
         return std::tie(i->scores[0], i->scores[1], i->scores[2], i->key) >
                     std::tie(j->scores[0], j->scores[1], j->scores[2], j->key);
@@ -190,18 +213,13 @@ struct Union_KV : public KV {
     }
 };
 
-struct pair_hash {
-    template <class T1, class T2>
-    std::size_t operator() (const std::pair<T1, T2> &pair) const {
-        return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
-    }
-};
-
 /*
 * Remembers the max-K elements seen so far using a min-heap
 */
 template <typename T, const auto& get_key = KV::get_key, const auto& get_distinct_key = KV::get_distinct_key,
-            const auto& is_greater = KV::is_greater, const auto& is_smaller = KV::is_smaller>
+            const auto& is_greater = KV::is_greater, const auto& is_smaller = KV::is_smaller,
+            const auto& set_group_found_value = KV::set_group_found_value,
+            const auto& get_group_found_value = KV::get_group_found_value>
 struct Topster {
     const uint32_t MAX_SIZE;
     uint32_t size;
@@ -216,16 +234,25 @@ struct Topster {
     spp::sparse_hash_set<uint64_t> group_doc_seq_ids;
     spp::sparse_hash_map<uint64_t, Topster<T, get_key, get_distinct_key, is_greater, is_smaller>*> group_kv_map;
 
+    // For estimating the count of groups identified by `distinct_key`.
     bool should_count_distinct;
     hyperloglog_hip::distinct_counter<5> hyperloglog_counter = hyperloglog_hip::distinct_counter<5>(12);
+
+    // For estimating the size of each group in the first pass of group_by. We'll have the exact size of each group in
+    // the second pass.
+    bool should_group_count;
+    group_found_params_t group_found_params;
+    CountMinSketch count_min = CountMinSketch(0.005, 0.01);
 
     explicit Topster(size_t capacity): Topster(capacity, 0, false, false) {
     }
 
-    explicit Topster(size_t capacity, size_t distinct, bool is_group_by_first_pass, bool should_count_distinct) :
-                                                                MAX_SIZE(capacity), size(0), distinct(distinct),
-                                                                is_group_by_first_pass(is_group_by_first_pass),
-                                                                should_count_distinct(should_count_distinct) {
+    explicit Topster(size_t capacity, size_t distinct, bool is_group_by_first_pass, bool should_count_distinct,
+                     const group_found_params_t& group_found_params = {}) :
+                        MAX_SIZE(capacity), size(0), distinct(distinct),
+                        is_group_by_first_pass(is_group_by_first_pass),
+                        should_count_distinct(should_count_distinct),
+                        group_found_params(group_found_params) {
         // we allocate data first to get a memory block whose indices are then assigned to `kvs`
         // we use separate **kvs for easier pointer swaps
         data = new T[capacity];
@@ -239,6 +266,8 @@ struct Topster {
             data[i].distinct_key = 0;
             kvs[i] = &data[i];
         }
+
+        should_group_count = is_group_by_first_pass && group_found_params.sort_index > -1;
     }
 
     ~Topster() {
@@ -269,6 +298,20 @@ struct Topster {
         for(auto& mkv: kv_map) {
             LOG(INFO) << "kv key: " << mkv.first << " => " << mkv.second->scores[mkv.second->match_score_index];
         }*/
+
+        if (should_group_count) {
+            const auto& key = get_distinct_key(kv);
+            count_min.update(key, get_group_found_value(kv, group_found_params));
+
+            group_found_params_t const& params = {group_found_params.sort_index, group_found_params.sort_order,
+                                                        count_min.estimate(key)};
+            set_group_found_value(kv, params);
+
+            const auto& found_it = map.find(key);
+            if (found_it != map.end()) {
+                set_group_found_value(found_it->second, params);
+            }
+        }
 
         int ret = 1;
        

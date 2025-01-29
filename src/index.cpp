@@ -40,7 +40,7 @@
 #define FACET_INDEX_THRESHOLD 1000000000
 
 spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::text_match_sentinel_value;
-spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::seq_id_sentinel_value;
+spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::group_found_sentinel_value;
 spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::eval_sentinel_value;
 spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::geo_sentinel_value;
 spp::sparse_hash_map<uint32_t, int64_t, Hasher32> Index::str_sentinel_value;
@@ -3407,6 +3407,22 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
     }
 #endif
 
+    group_found_params_t group_found_params{};
+    if (is_group_by_first_pass) {
+        for (size_t i = 0; i < sort_fields_std.size(); i++) {
+            const auto& sort_field = sort_fields_std[i];
+            if (sort_field.name != sort_field_const::group_found) {
+                continue;
+            }
+
+            group_found_params.sort_index = i;
+            if(sort_field.order == sort_field_const::asc) {
+                group_found_params.sort_order = -1;
+            }
+            break;
+        }
+    }
+
     size_t topster_size = std::max<size_t>(fetch_size, DEFAULT_TOPSTER_SIZE);
     if(filter_result_iterator->approx_filter_ids_length != 0 && filter_result_iterator->reference.empty()) {
         topster_size = std::min<size_t>(topster_size, filter_result_iterator->approx_filter_ids_length);
@@ -3414,7 +3430,7 @@ Option<bool> Index::search(std::vector<query_tokens_t>& field_query_tokens, cons
         topster_size = std::min<size_t>(topster_size, num_seq_ids());
     }
     topster_size = std::max((size_t)1, topster_size);  // needs to be atleast 1 since scoring is mandatory
-    topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass, true);
+    topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass, true, group_found_params);
     curated_topster = new Topster<KV>(topster_size, group_limit, is_group_by_first_pass, false);
 
     std::set<uint32_t> curated_ids;
@@ -5481,8 +5497,8 @@ Option<bool> Index::compute_sort_scores(const std::vector<sort_by>& sort_fields,
         if (field_values[i] == &text_match_sentinel_value) {
             scores[i] = int64_t(max_field_match_score);
             match_score_index = i;
-        } else if (field_values[i] == &seq_id_sentinel_value) {
-            scores[i] = seq_id;
+        } else if (field_values[i] == &group_found_sentinel_value) {
+            scores[i] = 0;
         } else if(field_values[i] == &geo_sentinel_value) {
             scores[i] = geopoint_distances[i];
         } else if(field_values[i] == &str_sentinel_value) {
@@ -6309,7 +6325,8 @@ Option<bool> Index::search_wildcard(filter_node_t const* const& filter_tree_root
 
         searched_queries.push_back({});
 
-        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct, is_group_by_first_pass, false);
+        topsters[thread_id] = new Topster<KV>(topster->MAX_SIZE, topster->distinct, is_group_by_first_pass, false,
+                                              topster->group_found_params);
         auto& compute_sort_score_status = compute_sort_score_statuses[thread_id] = nullptr;
 
         thread_pool->enqueue([this, &parent_search_begin, &parent_search_stop_ms, &parent_search_cutoff,
@@ -6483,7 +6500,7 @@ Option<bool> Index::populate_sort_mapping(int* sort_order, std::vector<size_t>& 
             field_values[i] = &text_match_sentinel_value;
         } else if (sort_fields_std[i].name == sort_field_const::seq_id || 
             sort_fields_std[i].name == sort_field_const::group_found) {
-            field_values[i] = &seq_id_sentinel_value;
+            field_values[i] = &group_found_sentinel_value;
         } else if (sort_fields_std[i].name == sort_field_const::eval) {
             field_values[i] = &eval_sentinel_value;
             auto& eval_exp = sort_fields_std[i].eval;
