@@ -779,7 +779,9 @@ void filter_result_iterator_t::init(const bool& enable_lazy_evaluation, const bo
             }
         } else {
             or_filter_iterators();
-            approx_filter_ids_length = std::max(left_it->approx_filter_ids_length, right_it->approx_filter_ids_length);
+            // Since we have not computed the sub-iterators at the moment, we can only estimate the maximum possible
+            // value. The maximum filter ids in the case of OR is when the sub-iterators have no ids in common.
+            approx_filter_ids_length = left_it->approx_filter_ids_length + right_it->approx_filter_ids_length;
         }
 
         // Rearranging the subtree in hope to reduce computation if/when compute_iterators() is called.
@@ -1613,6 +1615,10 @@ void filter_result_iterator_t::init(const bool& enable_lazy_evaluation, const bo
                 size_t min_len_2typo = 0;
                 std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3> field_values{};
                 const std::vector<size_t> geopoint_indices;
+                bool is_group_by_first_pass = false;
+                std::set<uint32_t> group_by_missing_value_ids;
+                bool enable_typos_for_numerical_tokens = true;
+                bool enable_typos_for_alpha_numerical_tokens = false;
 
                 auto fuzzy_search_fields_op = index->fuzzy_search_fields(fq_fields, value_tokens, {}, text_match_type_t::max_score,
                                                                          nullptr, 0, &dummy_it, {}, sort_fields,
@@ -1621,7 +1627,11 @@ void filter_result_iterator_t::init(const bool& enable_lazy_evaluation, const bo
                                                                          0, group_by_fields, false, false, false, false,
                                                                          query_hashes, MAX_SCORE, {true}, typo_tokens_threshold,
                                                                          false, max_filter_by_candidates, min_len_1typo, min_len_2typo,
-                                                                         0, nullptr, field_values, geopoint_indices, "", false);
+                                                                         0, nullptr, field_values, geopoint_indices,
+                                                                         is_group_by_first_pass,
+                                                                         group_by_missing_value_ids,
+                                                                         enable_typos_for_numerical_tokens,
+                                                                         enable_typos_for_alpha_numerical_tokens);
                 delete[] all_result_ids;
                 if(!fuzzy_search_fields_op.ok()) {
                     continue;

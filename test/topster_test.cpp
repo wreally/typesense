@@ -179,7 +179,7 @@ TEST(TopsterTest, MaxFloatValues) {
 }
 
 TEST(TopsterTest, DistinctIntValues) {
-    Topster<KV> dist_topster(5, 2);
+    Topster<KV> dist_topster(5, 2, false, false);
 
     struct {
         uint16_t query_index;
@@ -235,4 +235,29 @@ TEST(TopsterTest, DistinctIntValues) {
             EXPECT_EQ(9, dist_topster.group_kv_map[dist_topster.getDistinctKeyAt(i)]->getKV(1)->scores[0]);
         }
     }
+
+    Topster<KV> dist_topster_first_pass(7, 2, true, true);
+
+    for(int i = 0; i < 14; i++) {
+        int64_t scores[3];
+        scores[0] = int64_t(data[i].match_score);
+        scores[1] = data[i].primary_attr;
+        scores[2] = data[i].secondary_attr;
+
+        KV kv(data[i].query_index, i+100, data[i].distinct_key, 0, scores);
+        dist_topster_first_pass.add(&kv);
+    }
+
+    dist_topster_first_pass.sort();
+
+    distinct_ids = {4, 1, 5, 8, 9, 3, 7};
+    std::vector<uint64_t> ids = {104, 101, 106, 111, 112, 103, 110};
+
+    for(uint32_t i = 0; i < dist_topster_first_pass.size; i++) {
+        ASSERT_EQ(distinct_ids[i], dist_topster_first_pass.getDistinctKeyAt(i));
+        ASSERT_EQ(ids[i], dist_topster_first_pass.getKeyAt(i));
+    }
+
+    ASSERT_TRUE(dist_topster_first_pass.group_kv_map.empty());
+    ASSERT_EQ(10, dist_topster_first_pass.hyperloglog_counter.count());
 }

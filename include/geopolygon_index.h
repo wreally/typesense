@@ -28,6 +28,12 @@ public:
         covererOptions.set_max_cells(maxCells);
     }
 
+    ~GeoPolygonIndex() {
+        for (auto& item: cellToSeqids) {
+            ids_t::destroy_list(item.second);
+        }
+    }
+
     //insert seq_ids from mapped S2CellId
     void insertSeqIds(S2CellId value, uint32_t id);
 

@@ -197,6 +197,8 @@ struct search_args {
     bool enable_typos_for_alpha_numerical_tokens;
     bool rerank_hybrid_matches;
     bool validate_field_names;
+    size_t found_count = 0;
+    size_t found_docs = 0;
 
     search_args(std::vector<query_tokens_t> field_query_tokens, std::vector<search_field_t> search_fields,
                 const text_match_type_t match_type, std::vector<facet>& facets,
@@ -398,6 +400,13 @@ struct negate_left_join_t {
     negate_left_join_t() = default;
 };
 
+struct pair_hash {
+    template <class T1, class T2>
+    std::size_t operator() (const std::pair<T1, T2> &pair) const {
+        return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
+    }
+};
+
 class Index {
 private:
     mutable std::shared_mutex mutex;
@@ -465,7 +474,7 @@ private:
     // used as sentinels
 
     static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> text_match_sentinel_value;
-    static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> seq_id_sentinel_value;
+    static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> group_found_sentinel_value;
     static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> eval_sentinel_value;
     static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> geo_sentinel_value;
     static spp::sparse_hash_map<uint32_t, int64_t, Hasher32> str_sentinel_value;
@@ -496,7 +505,9 @@ private:
                    const bool group_missing_values,
                    const uint32_t* result_ids, size_t results_size,
                    int max_facet_count, bool is_wildcard_query,
-                   const std::vector<facet_index_type_t>& facet_index_types) const;
+                   const std::vector<facet_index_type_t>& facet_index_types,
+                   bool is_group_by_first_pass,
+                   std::set<uint32_t>& group_by_missing_value_ids) const;
 
     bool static_filter_query_eval(const override_t* override, std::vector<std::string>& tokens,
                                   std::unique_ptr<filter_node_t>& filter_tree_root, const bool& validate_field_names) const;
@@ -515,7 +526,7 @@ private:
                              bool enable_typos_for_numerical_tokens,
                              bool enable_typos_for_alpha_numerical_tokens) const;
 
-    static void aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster);
+    static void aggregate_topster(Topster<KV>* agg_topster, Topster<KV>* index_topster, const bool& is_group_by_first_pass);
 
     Option<bool> search_all_candidates(const size_t num_search_fields,
                                        const text_match_type_t match_type,
@@ -548,7 +559,9 @@ private:
                                        std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
                                        const std::vector<size_t>& geopoint_indices,
                                        std::set<uint64>& query_hashes,
-                                       std::vector<uint32_t>& id_buff) const;
+                                       std::vector<uint32_t>& id_buff,
+                                       bool is_group_by_first_pass,
+                                       std::set<uint32_t>& group_by_missing_value_ids) const;
 
     static void popular_fields_of_token(const spp::sparse_hash_map<std::string, art_tree*>& search_index,
                                         const std::string& previous_token,
@@ -576,7 +589,9 @@ private:
                               const size_t group_limit,
                               const std::vector<std::string>& group_by_fields,
                               const bool group_missing_values,
-                              std::vector<std::vector<art_leaf*>> & searched_queries) const;
+                              std::vector<std::vector<art_leaf*>> & searched_queries,
+                              bool is_group_by_first_pass,
+                              std::set<uint32_t>& group_by_missing_value_ids) const;
 
     static void compute_facet_stats(facet &a_facet, const std::string& raw_value,
                                     const std::string & field_type, const size_t count);
@@ -711,6 +726,7 @@ public:
 
     void get_distinct_id(posting_list_t::iterator_t& facet_index_it, const uint32_t seq_id,
                          const bool is_array, const bool group_missing_values, uint64_t& distinct_id,
+                         const bool& is_group_by_first_pass, std::set<uint32_t>& group_by_missing_value_ids,
                          bool is_reverse=false) const;
 
     static void compute_token_offsets_facets(index_record& record,
@@ -758,14 +774,16 @@ public:
                 const vector_query_t& vector_query, size_t facet_sample_percent, size_t facet_sample_threshold,
                 const drop_tokens_param_t drop_tokens_mode,
                 const std::vector<facet_index_type_t>& facet_index_types,
-                bool enable_typos_for_numerical_tokens = true,
-                bool enable_synonyms = true,
-                bool synonym_prefix = false,
-                uint32_t synonym_num_typos = 0,
-                bool enable_lazy_filter = false,
-                bool enable_typos_for_alpha_numerical_tokens = true,
-                const size_t& max_filter_by_candidates = DEFAULT_FILTER_BY_CANDIDATES,
-                bool rerank_hybrid_matches = false, const bool& validate_field_names = true) const;
+                bool enable_typos_for_numerical_tokens,
+                bool enable_synonyms,
+                bool synonym_prefix,
+                uint32_t synonym_num_typos,
+                bool enable_lazy_filter,
+                bool enable_typos_for_alpha_numerical_tokens,
+                const size_t& max_filter_by_candidates,
+                bool rerank_hybrid_matches, const bool& validate_field_names,
+                bool is_group_by_first_pass,
+                std::set<uint32_t>& group_by_missing_value_ids) const;
 
     void remove_field(uint32_t seq_id, nlohmann::json& document, const std::string& field_name,
                       const bool is_update);
@@ -849,7 +867,9 @@ public:
                                  const size_t concurrency,
                                  const int* sort_order,
                                  std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
-                                 const std::vector<size_t>& geopoint_indices) const;
+                                 const std::vector<size_t>& geopoint_indices,
+                                 const bool& is_group_by_first_pass,
+                                 std::set<uint32_t>& group_by_missing_value_ids) const;
 
     Option<bool> search_infix(const std::string& query, const std::string& field_name, std::vector<uint32_t>& ids,
                               size_t max_extra_prefix, size_t max_extra_suffix) const;
@@ -878,8 +898,9 @@ public:
                              size_t group_limit, bool is_wildcard_no_filter_query,
                              size_t max_candidates,
                              std::vector<facet_info_t>& facet_infos,
-                             const std::vector<facet_index_type_t>& facet_index_types
-                             ) const;
+                             const std::vector<facet_index_type_t>& facet_index_types,
+                             bool is_group_by_first_pass,
+                             std::set<uint32_t>& group_by_missing_value_ids) const;
 
     void resolve_space_as_typos(std::vector<std::string>& qtokens, const std::string& field_name,
                                 std::vector<std::vector<std::string>>& resolved_queries) const;
@@ -904,8 +925,8 @@ public:
                                  const std::vector<size_t>& geopoint_indices,
                                  const std::vector<uint32_t>& curated_ids_sorted,
                                  uint32_t*& all_result_ids, size_t& all_result_ids_len,
-                                 spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed,
-                                 const std::string& collection_name = "") const;
+                                 spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed, bool is_group_by_first_pass,
+                                 std::set<uint32_t>& group_by_missing_value_ids) const;
 
     [[nodiscard]] Option<bool> do_synonym_search(const std::vector<search_field_t>& the_fields,
                                                  const text_match_type_t match_type,
@@ -935,7 +956,9 @@ public:
                                                  const int* sort_order,
                                                  std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
                                                  const std::vector<size_t>& geopoint_indices,
-                                                 tsl::htrie_map<char, token_leaf>& qtoken_set) const;
+                                                 tsl::htrie_map<char, token_leaf>& qtoken_set,
+                                                 bool is_group_by_first_pass,
+                                                 std::set<uint32_t>& group_by_missing_value_ids) const;
 
     Option<bool> do_phrase_search(const size_t num_search_fields, const std::vector<search_field_t>& search_fields,
                                   std::vector<query_tokens_t>& field_query_tokens,
@@ -951,7 +974,8 @@ public:
                                   uint32_t*& all_result_ids, size_t& all_result_ids_len,
                                   spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed,
                                   const uint32_t* excluded_result_ids, size_t excluded_result_ids_size,
-                                  bool is_wildcard_query) const;
+                                  bool is_wildcard_query, bool is_group_by_first_pass,
+                                  std::set<uint32_t>& group_by_missing_value_ids) const;
 
     [[nodiscard]] Option<bool> fuzzy_search_fields(const std::vector<search_field_t>& the_fields,
                                                    const std::vector<token_t>& query_tokens,
@@ -984,6 +1008,8 @@ public:
                                                    const int* sort_order,
                                                    std::array<spp::sparse_hash_map<uint32_t, int64_t, Hasher32>*, 3>& field_values,
                                                    const std::vector<size_t>& geopoint_indices,
+                                                   bool is_group_by_first_pass,
+                                                   std::set<uint32_t>& group_by_missing_value_ids,
                                                    bool enable_typos_for_numerical_tokens = true,
                                                    bool enable_typos_for_alpha_numerical_tokens = true) const;
 
@@ -1025,7 +1051,9 @@ public:
                                       const std::vector<size_t>& geopoint_indices,
                                       std::vector<uint32_t>& id_buff,
                                       size_t& num_keyword_matches,
-                                      uint32_t*& all_result_ids, size_t& all_result_ids_len) const;
+                                      uint32_t*& all_result_ids, size_t& all_result_ids_len,
+                                      bool is_group_by_first_pass,
+                                      std::set<uint32_t>& group_by_missing_value_ids) const;
 
     static int64_t compute_aggregated_score(const std::vector<or_iterator_t>& its,
                                      std::vector<or_iterator_t>& dropped_token_its,
@@ -1070,7 +1098,9 @@ public:
                              filter_result_iterator_t* const filter_result_iterator,
                              std::set<uint32_t>& curated_ids,
                              std::map<size_t, std::map<size_t, uint32_t>>& included_ids_map,
-                             std::vector<uint32_t>& included_ids_vec) const;
+                             std::vector<uint32_t>& included_ids_vec,
+                             bool is_group_by_first_pass,
+                             std::set<uint32_t>& group_by_missing_value_ids) const;
     
     int64_t get_doc_val_from_sort_index(sort_index_iterator it, uint32_t doc_seq_id) const;
 
@@ -1123,7 +1153,8 @@ public:
 
     static void populate_result_kvs(Topster<KV>* topster, std::vector<std::vector<KV *>> &result_kvs,
                                     const spp::sparse_hash_map<uint64_t, uint32_t>& groups_processed,
-                                    const std::vector<sort_by>& sort_by_fields);
+                                    const std::vector<sort_by>& sort_by_fields,
+                                    const bool& is_group_by_first_pass);
 
     GeoPolygonIndex* get_geopolygon_index(const std::string& field_name) const;
 };

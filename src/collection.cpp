@@ -2533,7 +2533,6 @@ Option<bool> Collection::init_index_search_args(collection_search_args_t& coll_a
     return Option<bool>(true);
 }
 
-// todo: recheck search_args initialization.
 Option<nlohmann::json> Collection::search(std::string query, const std::vector<std::string> & search_fields,
                                           const std::string & filter_query, const std::vector<std::string> & facet_fields,
                                           const std::vector<sort_by> & sort_fields, const std::vector<uint32_t>& num_typos,
@@ -2693,17 +2692,10 @@ Option<nlohmann::json> Collection::search(collection_search_args_t& coll_args) c
     const auto& max_facet_values = coll_args.max_facet_values;
     const auto& facet_return_parent = coll_args.facet_return_parent;
     const auto& voice_query = coll_args.voice_query;
+    const auto& total = search_params->found_count;
 
     auto& raw_result_kvs = search_params->raw_result_kvs;
     auto& override_result_kvs = search_params->override_result_kvs;
-
-    size_t total = 0;
-    // for grouping we have to aggregate group set sizes to a count value
-    if(group_limit) {
-        total = search_params->groups_processed.size() + override_result_kvs.size();
-    } else {
-        total = search_params->all_result_ids_len;
-    }
 
     if(search_cutoff && total == 0) {
         // this can happen if other requests stopped this request from being processed
@@ -2845,7 +2837,7 @@ Option<nlohmann::json> Collection::search(collection_search_args_t& coll_args) c
     nlohmann::json result = nlohmann::json::object();
     result["found"] = total;
     if(group_limit != 0) {
-        result["found_docs"] = search_params->all_result_ids_len;
+        result["found_docs"] = search_params->found_docs;
     }
 
     if(exclude_fields.count("out_of") == 0) {
@@ -3599,9 +3591,9 @@ Option<bool> Collection::do_union(const std::vector<uint32_t>& collection_ids,
         return Option<bool>(408, "Request Timeout");
     }
 
-    auto union_topster = std::make_unique<Topster<Union_KV, std::pair<uint32_t, uint64_t>, pair_hash, Union_KV::get_key,
-                                                        Union_KV::is_greater, Union_KV::is_smaller>>(
-                                                            std::max<size_t>(union_params.fetch_size, Index::DEFAULT_TOPSTER_SIZE));
+    auto union_topster = std::make_unique<Topster<Union_KV, Union_KV::get_key, Union_KV::get_distinct_key,
+                                                    Union_KV::is_greater, Union_KV::is_smaller>>(
+                                                        std::max<size_t>(union_params.fetch_size, Index::DEFAULT_TOPSTER_SIZE));
 
     for (size_t search_index = 0; search_index < searches.size(); search_index++) {
         auto& search_param = search_params_guards[search_index];
@@ -7523,7 +7515,7 @@ Option<size_t> Collection::remove_all_docs() {
     std::string delete_end_prefix = get_seq_id_collection_prefix() + "`";
     rocksdb::Slice upper_bound(delete_end_prefix);
 
-    rocksdb::Iterator* iter = store->scan(delete_key_prefix, &upper_bound);
+    auto iter = std::unique_ptr<rocksdb::Iterator>(store->scan(delete_key_prefix, &upper_bound));
     nlohmann::json document;
 
     auto begin = std::chrono::high_resolution_clock::now();
