@@ -680,7 +680,6 @@ TEST_F(UnionTest, Pagination) {
     setupBoolCollection();
 
     // Since no sort_by is mentioned, the documents are returned based on seq_id (insertion order).
-    // Matches for the searches, individually:
     // search   seq_id
     //    0        9
     //    0        4
@@ -691,18 +690,6 @@ TEST_F(UnionTest, Pagination) {
     //    1        3
     //    1        2
     //    1        1
-    //    1        0
-    // The return order:
-    // search   seq_id
-    //    0        9
-    //    1        4
-    //    0        4
-    //    1        3
-    //    0        3
-    //    1        2
-    //    0        2
-    //    1        1
-    //    0        1
     //    1        0
     req_params = {
             {"page", "1"},
@@ -723,7 +710,7 @@ TEST_F(UnionTest, Pagination) {
                 ])"_json;
 
     auto search_op = collectionManager.do_union(req_params, embedded_params, searches, json_res, now_ts);
-    ASSERT_TRUE(search_op.ok());
+    ASSERT_TRUE(search_op.ok());LOG(INFO) << json_res.dump();
     ASSERT_EQ(10, json_res["found"]); // 5 documents from `coll_array_fields` and 5 documents from `coll_bool`.
     ASSERT_EQ(15, json_res["out_of"]);
     ASSERT_EQ(1, json_res["page"]);
@@ -734,10 +721,10 @@ TEST_F(UnionTest, Pagination) {
     ASSERT_EQ("The Legend of the Titanic", json_res["hits"][0]["document"]["title"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][0]["text_match"]);
 
-    ASSERT_EQ(1, json_res["hits"][1]["search_index"]);
-    ASSERT_EQ("coll_array_fields", json_res["hits"][1]["collection"]);
+    ASSERT_EQ(0, json_res["hits"][1]["search_index"]);
+    ASSERT_EQ("coll_bool", json_res["hits"][1]["collection"]);
     ASSERT_EQ("4", json_res["hits"][1]["document"]["id"]);
-    ASSERT_EQ("Jeremy Howard", json_res["hits"][1]["document"]["name"]);
+    ASSERT_EQ("The Wizard of Oz", json_res["hits"][1]["document"]["title"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][1]["text_match"]);
 
     ASSERT_EQ(5, json_res["union_request_params"][0]["found"]);
@@ -773,11 +760,13 @@ TEST_F(UnionTest, Pagination) {
     ASSERT_EQ(15, json_res["out_of"]);
     ASSERT_EQ(3, json_res["page"]);
     ASSERT_EQ(2, json_res["hits"].size());
-    ASSERT_EQ("3", json_res["hits"][0]["document"]["id"]);
-    ASSERT_EQ("The Schindler's List", json_res["hits"][0]["document"]["title"]);
+    ASSERT_EQ("coll_bool", json_res["hits"][0]["collection"]);
+    ASSERT_EQ("1", json_res["hits"][0]["document"]["id"]);
+    ASSERT_EQ("The Godfather", json_res["hits"][0]["document"]["title"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][0]["text_match"]);
 
-    ASSERT_EQ("2", json_res["hits"][1]["document"]["id"]);
+    ASSERT_EQ("coll_array_fields", json_res["hits"][1]["collection"]);
+    ASSERT_EQ("4", json_res["hits"][1]["document"]["id"]);
     ASSERT_EQ("Jeremy Howard", json_res["hits"][1]["document"]["name"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][1]["text_match"]);
 
@@ -811,11 +800,13 @@ TEST_F(UnionTest, Pagination) {
     ASSERT_EQ(15, json_res["out_of"]);
     ASSERT_EQ(4, json_res["page"]);
     ASSERT_EQ(2, json_res["hits"].size());
-    ASSERT_EQ("2", json_res["hits"][0]["document"]["id"]);
-    ASSERT_EQ("Daniel the Wizard", json_res["hits"][0]["document"]["title"]);
+    ASSERT_EQ("coll_array_fields", json_res["hits"][0]["collection"]);
+    ASSERT_EQ("3", json_res["hits"][0]["document"]["id"]);
+    ASSERT_EQ("Jeremy Howard", json_res["hits"][0]["document"]["name"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][0]["text_match"]);
 
-    ASSERT_EQ("1", json_res["hits"][1]["document"]["id"]);
+    ASSERT_EQ("coll_array_fields", json_res["hits"][1]["collection"]);
+    ASSERT_EQ("2", json_res["hits"][1]["document"]["id"]);
     ASSERT_EQ("Jeremy Howard", json_res["hits"][1]["document"]["name"]);
     ASSERT_EQ(578730123365187705, json_res["hits"][1]["text_match"]);
     json_res.clear();

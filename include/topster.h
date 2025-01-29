@@ -195,13 +195,17 @@ struct Union_KV : public KV {
     }
 
     static bool is_greater(const Union_KV* i, const Union_KV* j) {
-        return std::tie(i->scores[0], i->scores[1], i->scores[2], i->search_index, i->key) >
-                    std::tie(j->scores[0], j->scores[1], j->scores[2], j->search_index, j->key);
+        // When the scores are same, we'll order the Union kvs according to ascending order of their search_index and
+        // in descending order of their sequence ids.
+        return std::tie(i->scores[0], i->scores[1], i->scores[2], j->search_index, i->key) >
+                    std::tie(j->scores[0], j->scores[1], j->scores[2], i->search_index, j->key);
     }
 
     static bool is_smaller(const Union_KV* i, const Union_KV* j) {
-        return std::tie(i->scores[0], i->scores[1], i->scores[2], i->search_index, i->key) <
-                    std::tie(j->scores[0], j->scores[1], j->scores[2], j->search_index, j->key);
+        // When the scores are same, we'll order the Union kvs according to ascending order of their search_index and
+        //
+        return std::tie(i->scores[0], i->scores[1], i->scores[2], j->search_index, i->key) <
+                    std::tie(j->scores[0], j->scores[1], j->scores[2], i->search_index, j->key);
     }
 
     static constexpr uint64_t get_key(const Union_KV* union_kv) {
