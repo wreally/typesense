@@ -1,0 +1,4 @@
+dist
+binaries
+**/package.json
+**/pnpm-lock.yaml

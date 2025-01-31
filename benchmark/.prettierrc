@@ -1,0 +1,18 @@
+{
+  "tabWidth": 2,
+  "useTabs": false,
+  "experimentalTernaries": true,
+  "plugins": ["@ianvs/prettier-plugin-sort-imports"],
+  "printWidth": 120,
+  "importOrder": [
+    "<TYPES>",
+    "",
+    "<THIRD_PARTY_MODULES>",
+    "",
+    "<TYPES>^[.|..|~]",
+    "^@/",
+    "^[../]",
+    "^[./]"
+  ],
+  "importOrderParserPlugins": ["typescript", "jsx", "decorators-legacy"]
+}

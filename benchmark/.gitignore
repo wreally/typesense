@@ -1,0 +1,6 @@
+bin
+data
+dist
+node_modules
+binaries
+.env

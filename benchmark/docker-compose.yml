@@ -1,0 +1,65 @@
+networks:
+  k6:
+  grafana:
+
+services:
+  influxdb:
+    image: influxdb:1.8
+    networks:
+      - k6
+      - grafana
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=k6
+    volumes:
+      - ./influxdb.generated.conf:/etc/influxdb/influxdb.conf
+      - ./influxdb-data:/var/lib/influxdb
+    command: influxd -config /etc/influxdb/influxdb.conf
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:8.5.21
+    networks:
+      - grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_BASIC_ENABLED=false
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./dashboards:/var/lib/grafana/dashboards
+      - ./grafana-dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboard.yaml:ro
+      - ./grafana-datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yaml:ro
+
+  k6:
+    image: grafana/k6:latest
+    networks:
+      - k6
+    ports:
+      - "6565:6565"
+    environment:
+      - K6_OUT=influxdb=http://influxdb:8086/k6
+      - K6_BATCH_SIZE=50000
+      - K6_FLUSH_INTERVAL=5s
+      - K6_OUT_INFLUXDB_CONCURRENT_WRITES=40
+      - K6_OUT_INFLUXDB_PUSH_INTERVAL=2s
+    volumes:
+      - ./:/app
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

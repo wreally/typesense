@@ -1,0 +1,192 @@
+name: Benchmark Testing
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-testing:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get run IDs and SHAs
+        id: get-runs
+        run: |
+          # First determine if we're on a fork
+          REPO_INFO=$(gh api /repos/${{ github.repository }})
+          IS_FORK=$(echo "$REPO_INFO" | jq -r '.fork')
+          PARENT_REPO=$(echo "$REPO_INFO" | jq -r '.parent.full_name // empty')
+          DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch')
+          
+          echo "Is fork: $IS_FORK"
+          if [ "$IS_FORK" = "true" ]; then
+            echo "This is a fork of $PARENT_REPO"
+            # For forks, get successful runs from the current repo
+            REPO_TO_CHECK="${{ github.repository }}"
+          else
+            echo "This is the main repo"
+            # For main repo, get successful runs from main branch
+            REPO_TO_CHECK="${{ github.repository }}"
+            BRANCH_FILTER="and .head_branch == \"$DEFAULT_BRANCH\""
+          fi
+
+          echo "Fetching workflow runs from $REPO_TO_CHECK..."
+          if [ "$IS_FORK" = "true" ]; then
+            RUNS_INFO=$(gh api -H "Accept: application/vnd.github+json" \
+              /repos/$REPO_TO_CHECK/actions/workflows/tests.yml/runs \
+              -q '.workflow_runs[] | select(.conclusion == "success") | {id: .id, sha: .head_sha, branch: .head_branch, conclusion: .conclusion}' \
+              --paginate | head -n 2)
+          else
+            RUNS_INFO=$(gh api -H "Accept: application/vnd.github+json" \
+              /repos/$REPO_TO_CHECK/actions/workflows/tests.yml/runs \
+              -q ".workflow_runs[] | select(.conclusion == \"success\" and .head_branch == \"$DEFAULT_BRANCH\") | {id: .id, sha: .head_sha, branch: .head_branch, conclusion: .conclusion}" \
+              --paginate | head -n 2)
+          fi
+          
+          echo "Found runs info:"
+          echo "$RUNS_INFO"
+          
+          if [ -z "$RUNS_INFO" ]; then
+            echo "No successful runs found"
+            exit 1
+          fi
+          
+          # Extract the latest run info (first line)
+          LATEST_RUN=$(echo "$RUNS_INFO" | head -n 1)
+          LATEST_ID=$(echo "$LATEST_RUN" | jq -r '.id')
+          LATEST_SHA=$(echo "$LATEST_RUN" | jq -r '.sha')
+          
+          # Extract the previous run info (second line)
+          PREVIOUS_RUN=$(echo "$RUNS_INFO" | tail -n 1)
+          PREVIOUS_ID=$(echo "$PREVIOUS_RUN" | jq -r '.id')
+          PREVIOUS_SHA=$(echo "$PREVIOUS_RUN" | jq -r '.sha')
+          
+          echo "Latest run ID: $LATEST_ID"
+          echo "Latest SHA: $LATEST_SHA"
+          echo "Previous run ID: $PREVIOUS_ID"
+          echo "Previous SHA: $PREVIOUS_SHA"
+          
+          # Set outputs
+          echo "latest_run=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "previous_run=$PREVIOUS_ID" >> $GITHUB_OUTPUT
+          echo "latest_sha=$LATEST_SHA" >> $GITHUB_OUTPUT
+          echo "previous_sha=$PREVIOUS_SHA" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Download latest version binary
+      - name: Download Latest Version Binary
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: tests.yml
+          name: typesense-server
+          path: ./current-binary
+          run_id: ${{ steps.get-runs.outputs.latest_run }}
+          workflow_conclusion: success
+
+      # Download previous version binary
+      - name: Download Previous Version Binary
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: tests.yml
+          name: typesense-server
+          path: ./base-binary
+          run_id: ${{ steps.get-runs.outputs.previous_run }}
+          workflow_conclusion: success
+
+      # Make binaries executable
+      - name: Make binaries executable
+        run: |
+          chmod +x ./current-binary/typesense-server
+          chmod +x ./base-binary/typesense-server
+
+      # Download previous benchmark data
+      - name: Download previous benchmark data
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          name: benchmark-data
+          workflow: benchmark-testing.yml
+          path: ./benchmark/influxdb-data
+          search_artifacts: true
+          workflow_conclusion: ""
+        continue-on-error: true
+
+      # Prepare InfluxDB
+      - name: Prepare data directory
+        working-directory: benchmark
+        run: |
+          mkdir -p ./influxdb-data
+          sudo chown -R 999:999 ./influxdb-data
+
+      - name: Start containers
+        working-directory: benchmark
+        run: docker compose up -d
+
+      - name: Wait for InfluxDB to be ready
+        working-directory: benchmark
+        run: |
+          timeout 30s bash -c '
+          until curl -s http://localhost:8086/ping; do
+            echo "Waiting for InfluxDB..."
+            sleep 1
+          done
+          '
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: benchmark
+        run: |
+          npm install -g pnpm
+          pnpm install
+
+      - name: Build CLI
+        working-directory: benchmark
+        run: pnpm build
+
+      - name: Run Benchmark Comparison
+        working-directory: benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # Print the SHAs for reference
+          echo "Latest SHA: ${{ steps.get-runs.outputs.latest_sha }}"
+          echo "Previous SHA: ${{ steps.get-runs.outputs.previous_sha }}"
+          
+          ./dist/index.js benchmark \
+            --binaries $(pwd)/../base-binary/typesense-server $(pwd)/../current-binary/typesense-server -c ${{ steps.get-runs.outputs.previous_sha }} ${{ steps.get-runs.outputs.latest_sha }} -d $(pwd)/benchmark-workdir  -y -v  --duration 1m
+
+      # Fix permissions and save data
+      - name: Fix permissions for artifact upload
+        if: always()
+        working-directory: benchmark
+        run: |
+          sudo chown -R $USER:$USER ./influxdb-data
+          sudo find ./influxdb-data -type d -exec chmod 755 {} \;
+          sudo find ./influxdb-data -type f -exec chmod 644 {} \;
+
+      - name: Upload benchmark data
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-data
+          path: ./benchmark/influxdb-data
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+
+      - name: Stop containers
+        if: always()
+        working-directory: benchmark
+        run: docker compose down

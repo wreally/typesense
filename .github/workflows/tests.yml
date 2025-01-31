@@ -1,7 +1,7 @@
 name: tests
 
 #on: workflow_dispatch
-on: [push, pull_request]
+on: [push, pull_request_target]
 
 # Cancel previous running if a new push is made
 # Source: https://stackoverflow.com/a/72408109/123545
@@ -100,3 +100,45 @@ jobs:
         with:
           name: typesense-server
           path: ${{ env.BAZEL_BIN_FULL_PATH }}/typesense-server
+   
+  integration-tests:
+    needs: test
+
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Typesense Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: typesense-server
+          path: ./typesense-server-binary
+
+      - name: Make binary executable
+        run: chmod +x ./typesense-server-binary/typesense-server
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: benchmark
+        run: |
+          npm install -g pnpm
+          pnpm install
+
+      - name: Build CLI
+        working-directory: benchmark
+        run: pnpm build
+
+      - name: Run Integration Tests
+        working-directory: benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          ./dist/index.js test \
+            --binary $(pwd)/../typesense-server-binary/typesense-server \
+            --working-directory $(pwd)/../tmp/test -y -v
