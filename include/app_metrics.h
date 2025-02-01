@@ -9,6 +9,7 @@
 #include <shared_mutex>
 #include <mutex>
 #include <fstream>
+#include "tdigest.h"
 
 class AppMetrics {
 private:
@@ -16,11 +17,11 @@ private:
 
     // stores last complete window
     spp::sparse_hash_map<std::string, uint64_t>* counts;
-    spp::sparse_hash_map<std::string, uint64_t>* durations;
+    spp::sparse_hash_map<std::string, TDigest>* durations;
 
     // stores the current window
     spp::sparse_hash_map<std::string, uint64_t>* current_counts;
-    spp::sparse_hash_map<std::string, uint64_t>* current_durations;
+    spp::sparse_hash_map<std::string, TDigest>* current_durations;
 
     std::string access_log_path;
     std::ofstream access_log;
@@ -29,8 +30,8 @@ private:
         current_counts = new spp::sparse_hash_map<std::string, uint64_t>();
         counts = new spp::sparse_hash_map<std::string, uint64_t>();
 
-        current_durations = new spp::sparse_hash_map<std::string, uint64_t>();
-        durations = new spp::sparse_hash_map<std::string, uint64_t>();
+        current_durations = new spp::sparse_hash_map<std::string, TDigest>();
+        durations = new spp::sparse_hash_map<std::string, TDigest>();
 
         access_log_path = Config::get_instance().get_access_log_path();
         if(Config::get_instance().get_enable_access_logging() && !access_log_path.empty()) {
@@ -70,7 +71,7 @@ public:
 
     void increment_duration(const std::string& identifier, uint64_t duration) {
         std::unique_lock lock(mutex);
-        (*current_durations)[identifier] += duration;
+        (*current_durations)[identifier].add(duration);
     }
 
     void increment_write_metrics(uint64_t route_hash, uint64_t duration);
